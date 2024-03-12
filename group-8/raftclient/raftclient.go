@@ -36,15 +36,16 @@ func getServerHostPort() string{
 // This function connects the client process to the server
 func startClient(serverHostPort string) { 
 	conn, err := net.ListenPacket("udp", ":0")
+	if err != nil {
+		log.Fatal(err)
+	}
 	connection = conn
-	if err != nil {
-		log.Fatal(err)
-	}
+
 	dst, err := net.ResolveUDPAddr("udp", serverHostPort)
-	destinationAddr = dst
 	if err != nil {
 		log.Fatal(err)
 	}
+	destinationAddr = dst
 }
 
 // Disconnects the client from the UDP connection when client exits
@@ -55,6 +56,9 @@ func exitClient() {
 
 	// Close UDP connection
 	connection.Close()
+
+	// Exit the process from OS
+	os.Exit(0)
 }
 
 // Sends a message through the UDP connection to the server
@@ -64,8 +68,7 @@ func sendCommand(command miniraft.Raft_CommandName) {
 	defer mutex.Unlock()
 
 	// Sends command through UDP connection
-	var err error;
-	_, err = connection.WriteTo([]byte(command.CommandName), destinationAddr)
+	_, err := connection.WriteTo([]byte(command.CommandName), destinationAddr)
 	if err != nil {
 		log.Fatal(err)
 	}	
@@ -75,7 +78,7 @@ func sendCommand(command miniraft.Raft_CommandName) {
  command interface for the Client Process */
 func startCommandInterface() {
 	reader := bufio.NewReader(os.Stdin)                                      // Create a reader for stdin
-	fmt.Println("Client Process command interface started. Enter commands:") // Print a welcome message
+	fmt.Println("Client Process command interface started. Enter commands:") 
 
 	for {
 		fmt.Print("> ")                     // Print the command prompt
