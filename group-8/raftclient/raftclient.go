@@ -137,7 +137,7 @@ func containsValidCommandString(s string) bool {
 
 // main is the entry point of the program
 func main() {
-	if len(os.Args) == 2 {
+	if len(os.Args) != 2 {
 		fmt.Println("Client Usage: go run raftclient.go <server-host:server-port>")
 		return
 	}

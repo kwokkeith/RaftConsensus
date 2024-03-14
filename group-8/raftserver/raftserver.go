@@ -48,7 +48,7 @@ func startServer(serverHostPort string){
 		if err != nil {
 			log.Fatal(err)
 		}
-		log.Printf("From %s: %v\n", addr.String(), data[:length])
+		log.Printf("From %s: %v\n", addr.String(), string(data[:length]))
 	}
 }
 
@@ -119,7 +119,7 @@ func startCommandInterface() {
 
 // main is the entry point of the program
 func main() {
-	if len(os.Args) == 3 {
+	if len(os.Args) != 3 {
 		fmt.Println("Server Usage: go run raftserver.go <server-host:server-port> filename_of_serverList")
 		return
 	}
