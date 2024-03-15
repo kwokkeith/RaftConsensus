@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+
+	"google.golang.org/protobuf/proto"
 )
 
 //=========================================
@@ -161,6 +163,49 @@ func sendCommand(command miniraft.Raft_CommandName) {
 		log.Fatal(err)
 	}	
 } 
+
+// Function to send the miniraft message
+func SendMiniRaftMessage(conn *net.UDPConn, addr *net.UDPAddr, message *miniraft.Raft) (err error) {
+	// Serialize the message
+	data, err := proto.Marshal(message)
+	log.Printf("SendMiniRaftMessage(): sending %s (%v), %d to %s\n", message, data, len(data), addr.String())
+	if err != nil {
+		log.Panicln("Failed to marshal message.", err)
+	}
+
+	// Send the message over, we dont need to send the size of the message as UDP handles it,
+	// but we need to specify the address of where we are sending it to as UDP is stateless and it doesnt rmb where data should be sent 
+	_, err = conn.WriteToUDP(data, addr)
+	if err != nil {
+		log.Panicln("Failed to send message.", err)
+	}
+	return 
+}
+
+// Function to receive the miniraft message 
+func ReceiveMiniRaftMessage(conn *net.UDPConn) (message *miniraft.Raft, addr *net.UDPAddr, err error) {
+	// Create a buffer to read the message into
+	buffer := make([]byte, 1024)
+	
+	// Read the message into the buffer
+	n, addr, err := conn.ReadFromUDP(buffer)
+	if err != nil {
+		log.Printf("ReceiveMiniRaftMessage(): failed to read message: %v\n", err)
+	}
+
+	if n != 1024 {
+		log.Printf("ReceiveMiniRaftMessage(): received %d bytes, expected 1024\n", n)
+	}
+
+	// Unmarshal the message
+	message = &miniraft.Raft{}
+	err = proto.Unmarshal(buffer[:n], message)
+	if err != nil {
+		log.Printf("ReceiveMiniRaftMessage(): failed to unmarshal message: %v\n", err)
+	}
+	log.Printf("ReceiveMiniRaftMessage(): received %s (%v), %d from %s\n", message, buffer[:n], n, addr.String())
+	return 
+}
 
 //=========================================
 //=========================================
