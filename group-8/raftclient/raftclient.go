@@ -12,7 +12,11 @@ import (
 	"unicode"
 )
 
-// Define Global Variables
+//=========================================
+//=========================================
+// Variables
+//=========================================
+//=========================================
 var (
 	mutex sync.Mutex
 	serverHostPort string
@@ -20,6 +24,11 @@ var (
 	destinationAddr *net.UDPAddr
 )
 
+//=========================================
+//=========================================
+// Getter/Setter Variables
+//=========================================
+//=========================================
 // Getter and Setter for server HostPort Address
 func setServerHostPort(hostPort string){
 	mutex.Lock()
@@ -32,6 +41,12 @@ func getServerHostPort() string{
 	defer mutex.Unlock()
 	return serverHostPort
 }
+
+//=========================================
+//=========================================
+// Client start setup
+//=========================================
+//=========================================
 
 // This function connects the client process to the server
 func startClient(serverHostPort string) { 
@@ -60,19 +75,6 @@ func exitClient() {
 	// Exit the process from OS
 	os.Exit(0)
 }
-
-// Sends a message through the UDP connection to the server
-func sendCommand(command miniraft.Raft_CommandName) {
-	// Lock to prevent any other server action while sending command
-	mutex.Lock()
-	defer mutex.Unlock()
-
-	// Sends command through UDP connection
-	_, err := connection.WriteTo([]byte(command.CommandName), destinationAddr)
-	if err != nil {
-		log.Fatal(err)
-	}	
-} 
 
 /* startCommandInterface runs the interactive 
  command interface for the Client Process */
@@ -115,6 +117,12 @@ func startCommandInterface() {
 	}
 }
 
+//=========================================
+//=========================================
+// Client Message Utilities
+//=========================================
+//=========================================
+
 // Function that checks if a string contains punctuations and whitespaces
 func containsPunctuationWhitespace(s string) bool {
     for _, runeValue := range s {
@@ -134,6 +142,31 @@ func containsValidCommandString(s string) bool {
     }
     return true
 }
+
+//=========================================
+//=========================================
+// Client Communication
+//=========================================
+//=========================================
+
+// Sends a message through the UDP connection to the server
+func sendCommand(command miniraft.Raft_CommandName) {
+	// Lock to prevent any other server action while sending command
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	// Sends command through UDP connection
+	_, err := connection.WriteTo([]byte(command.CommandName), destinationAddr)
+	if err != nil {
+		log.Fatal(err)
+	}	
+} 
+
+//=========================================
+//=========================================
+// Server Main
+//=========================================
+//=========================================
 
 // main is the entry point of the program
 func main() {

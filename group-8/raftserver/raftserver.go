@@ -1,20 +1,50 @@
 package main
 
 import (
+	"RAFTCONSENSUS/miniraft"
 	"bufio"
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"os"
 	"strings"
 	"sync"
+	"time"
+)
+
+//=========================================
+//=========================================
+// Variables
+//=========================================
+//=========================================
+
+// For serverstate
+type ServerState int
+const (
+    Leader ServerState = iota // 0
+    Follower // 1
+    Candidate // 2
 )
 
 var (
 	mutex sync.Mutex
 	serverHostPort string
 	serverAddr *net.UDPAddr
+	timeOut int
+	startTime time.Time
+	state ServerState = Follower // Start as a follower
+	term int = 0
+	lastLogIndex int = 0
+	lastLogTerm int = 0
+	timeOutCounter time.Timer; 
 )
+
+//=========================================
+//=========================================
+// Getter/Setter Variables
+//=========================================
+//=========================================
 
 // Getter and Setter for server HostPort Address
 func setServerHostPort(hostPort string){
@@ -29,6 +59,12 @@ func getServerHostPort() string{
 	return serverHostPort
 }
 
+//=========================================
+//=========================================
+// Server startup
+//=========================================
+//=========================================
+
 // Function to start server on the defined address
 func startServer(serverHostPort string){
 	addr, err := net.ResolveUDPAddr("udp", serverHostPort)
@@ -37,19 +73,13 @@ func startServer(serverHostPort string){
 	}
 	serverAddr = addr
 
-	listener, err := net.ListenUDP("udp", serverAddr)
-	if err != nil { 
-		log.Fatal(err)
-	}
+	// Generate random timeout
+	minTimeOut := 10;
+	maxTimeOut := 100;
+	timeOut = rand.Intn(maxTimeOut - minTimeOut + 1) + minTimeOut
 
-	for { 
-		data := make([]byte, 65536)
-		length, addr, err := listener.ReadFromUDP(data)
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Printf("From %s: %v\n", addr.String(), string(data[:length]))
-	}
+	// Start communication (looped to keep listening until exit)
+	handleCommunication()	
 }
 
 /* Checks if server is in the list of servers, else append it */
@@ -117,6 +147,79 @@ func startCommandInterface() {
 	}
 }
 
+//=========================================
+//=========================================
+// Server Timeout
+//=========================================
+//=========================================
+
+/* Check timeout for client */
+func handleTimeOut(){
+	// Change to candidate state
+	state = Candidate;
+
+	// Send out votes
+	// Create an instance of RequestVoteRequest
+	request := miniraft.RequestVoteRequest{
+		Term:          uint64(term) + 1, // Add one to the term when becoming a candidate
+		LastLogIndex:  uint64(lastLogIndex),
+		LastLogTerm:   uint64(lastLogTerm),
+		CandidateName: serverHostPort,
+	}
+
+	// Send vote Request to other followers
+	
+}
+
+//=========================================
+//=========================================
+// Server Communication
+//=========================================
+//=========================================
+
+/* This function sets up the listening port for the server to receive
+messages from other servers */
+func handleCommunication(){
+	listener, err := net.ListenUDP("udp", serverAddr)
+	if err != nil { 
+		log.Fatal(err)
+	}
+
+	// Start Communication
+	for { 
+		data := make([]byte, 65536)
+		length, addr, err := listener.ReadFromUDP(data)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// Stop any timer that was running
+		timeOutCounter.Stop();
+
+		// Start a timer for time to check timeout
+		timeOutCounter = *time.AfterFunc(time.Duration(timeOut), handleTimeOut);
+
+		// Debug message to check message received
+		log.Printf("From %s: %v\n", addr.String(), data[:length])
+
+		// Handles the message based on its type
+		handleMessage(data);
+	}
+}
+
+/* Function to handle the message based on its type */
+func handleMessage(data []byte){
+
+}
+
+
+
+//=========================================
+//=========================================
+// Server Main
+//=========================================
+//=========================================
+
 // main is the entry point of the program
 func main() {
 	if len(os.Args) != 3 {
@@ -140,7 +243,7 @@ func main() {
 	// Check if server exist in the server list and if not append it to the list
 	// If server exist then throw an error and do not start new server with defined address
 	updateServerList(serverHostPort, serversFile)
-
+	
 	// Starts the server on the defined address
 	go startServer(getServerHostPort())
 
