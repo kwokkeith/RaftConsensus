@@ -32,6 +32,7 @@ const (
 var (
 	mutex sync.Mutex
 	timerMutex sync.Mutex
+	heartbeatTimerMutex sync.Mutex
 	timerIsActive bool = false;
 	serverHostPort string = ""
 	serverAddr *net.UDPAddr
@@ -43,7 +44,7 @@ var (
 	nextLogIndex int = 1 // Next log entry for the current server
 	nextIndex map[string]int // List of servers and their index of the next log entry to be sent to that server
 	matchIndex map[string]int // List of servers and their index of highest log entry known to be replicated (commitIndex)
-	timeOutCounter time.Timer; 
+	timeOutCounter *time.Timer; 
 	servers []string
 	leader string = "" // IP:Port address of the leader
 	leaderVotedFor string = ""
@@ -52,6 +53,7 @@ var (
 	lastAppliedIndex int = 0
 	voteReceived int // Count number of votes received for this term
 	hearbeatInterval int = 5;
+	heartbeatTimerIsActive bool = false;
 )
 
 //=========================================
@@ -210,6 +212,9 @@ func startCommandInterface() {
 /* Check timeout for client */
 func handleTimeOut(){
 	// Change to candidate state
+	if state == Leader {
+		return
+	}
 	state = Candidate;
 
 	// Send out votes
@@ -256,25 +261,10 @@ func handleCommunication(){
 		}
 
 		// Stop any timer that was running
-		timerMutex.Lock()
-		if timerIsActive {
-			if !timeOutCounter.Stop() {
-				// Try to drain the channel if the timer has already expired
-				select {
-				case <-timeOutCounter.C:
-				default:
-				}
-			}
-			timerIsActive = false
-		}
-
 		// Start a timer for time to check timeout if current server is not a leader
 		if state != Leader {
-			timerIsActive = true
-			timeOutCounter = *time.AfterFunc(time.Second*time.Duration(timeOut), handleTimeOut);
+			resetTimer()
 		}
-		timerMutex.Unlock()
-		
 
 		// Debug message to check message received
 		log.Printf("From %s: %v\n", addr.String(), data[:length])
@@ -325,6 +315,11 @@ func handleMessage(data []byte){
 /* Function to broadcast msg to all servers that are in the server list */
 func broadcastMessage(message *miniraft.Raft){
 	updateServersKnowledge() // To update list of known servers
+
+	// If server is suspended
+	if suspended {
+		return
+	}
 
 	// Send vote Request to other followers
 	msg, err := proto.Marshal(message)
@@ -385,8 +380,19 @@ func handleCommandName(message miniraft.Raft_CommandName) {
 func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
 	var success = true
 
-	// Set leader
-	leader = message.AppendEntriesRequest.LeaderId
+	// Set leader (Neutralise old leader too)
+	// if this server thinks it is the leader
+	// If this leader is older then neutralise itself and become a follower, also update its term
+	if state == Leader {
+		if message.AppendEntriesRequest.GetTerm() > uint64(term) {
+			leader = message.AppendEntriesRequest.GetLeaderId()
+			state = Follower
+			term = int(message.AppendEntriesRequest.GetTerm())
+		}
+	} else {
+		leader = message.AppendEntriesRequest.GetLeaderId()
+	}
+	
 
 	// Checks to get success result for Response message
 	if message.AppendEntriesRequest.GetTerm() < uint64(term) {
@@ -513,7 +519,24 @@ func handleRequestVoteResponse(message miniraft.Raft_RequestVoteResponse){
 				// Send heartbeat to tell servers, this is the new leader
 				SendHeartBeat();				
 				state = Leader; // Become the new leader
+				SetHeartBeatRoutine(); // Routinely send heartbeat
 				leader = serverHostPort // Update who the current leader is
+				voteReceived = 0 // Reset counter
+				
+				// Stop timer too for timeout
+				timerMutex.Lock()
+				defer timerMutex.Unlock()
+				if timerIsActive {
+					// Stop the current timer. If Stop returns false, the timer has already fired.
+					if !timeOutCounter.Stop() {
+						// If the timer already expired and the handleTimeOut function might be in queue,
+						// try to drain the channel to prevent handleTimeOut from executing if it hasn't yet.
+						select {
+						case <-timeOutCounter.C:
+						default:
+						}
+					}
+				}	
 			}
 		}
 	}
@@ -524,6 +547,35 @@ func handleRequestVoteResponse(message miniraft.Raft_RequestVoteResponse){
 // Server Utilities
 //=========================================
 //=========================================
+
+// To set timer for handling timeout of servers
+func resetTimer() {
+    timerMutex.Lock()
+    defer timerMutex.Unlock()
+
+    if timerIsActive {
+        // Stop the current timer. If Stop returns false, the timer has already fired.
+        if !timeOutCounter.Stop() {
+            // If the timer already expired and the handleTimeOut function might be in queue,
+            // try to drain the channel to prevent handleTimeOut from executing if it hasn't yet.
+            select {
+            case <-timeOutCounter.C:
+            default:
+            }
+        }
+    }
+
+    // Regardless of the previous timer's state, start a new timer.
+    timerIsActive = true
+    timeOutCounter = time.AfterFunc(time.Second*time.Duration(timeOut), func() {
+        handleTimeOut()
+        // After the timer executes, reset timerIsActive to false.
+        timerMutex.Lock()
+        timerIsActive = false
+        timerMutex.Unlock()
+    })
+}
+
 
 // Function to send the miniraft message
 func SendMiniRaftMessage(ipPortAddr string, message *miniraft.Raft) (err error) {
@@ -590,6 +642,19 @@ func updateServersKnowledge(){
 	}
 }
 
+/* This function sets the heartbeat routine for 
+leader to send heartbeat in a fixed interval */
+func SetHeartBeatRoutine(){
+	for state == Leader {
+		heartbeatTimerMutex.Lock()
+		if !heartbeatTimerIsActive {
+			heartbeatTimerIsActive = true
+			timeOutCounter = time.AfterFunc(time.Second*time.Duration(hearbeatInterval), SendHeartBeat);
+		}
+		heartbeatTimerMutex.Unlock()
+	}
+}
+
 /* This function is used for the leader to send heartbeats */
 func SendHeartBeat(){
 	request := miniraft.AppendEntriesRequest{
@@ -608,6 +673,10 @@ func SendHeartBeat(){
 		},
 	}
 	broadcastMessage(message)
+
+	heartbeatTimerMutex.Lock()
+	heartbeatTimerIsActive = false // Set timer off
+	heartbeatTimerMutex.Unlock()
 }
 //=========================================
 //=========================================
