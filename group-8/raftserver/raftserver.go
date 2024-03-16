@@ -43,14 +43,14 @@ var (
 	nextLogIndex int = 1 // Next log entry for the current server
 	nextIndex map[string]int // List of servers and their index of the next log entry to be sent to that server
 	matchIndex map[string]int // List of servers and their index of highest log entry known to be replicated (commitIndex)
-	lastLogTerm int = 0
 	timeOutCounter time.Timer; 
 	servers []string
-	leader string = ""
+	leader string = "" // IP:Port address of the leader
 	leaderVotedFor string = ""
 	logs []miniraft.LogEntry
 	commitIndex int = 0
 	lastAppliedIndex int = 0
+	voteReceived int // Count number of votes received for this term
 )
 
 //=========================================
@@ -214,8 +214,8 @@ func handleTimeOut(){
 	// Create an instance of RequestVoteRequest
 	request := &miniraft.RequestVoteRequest{
 		Term:          uint64(term) + 1, // Add one to the term when becoming a candidate
-		LastLogIndex:  uint64(nextLogIndex - 1), 
-		LastLogTerm:   GetLastLogIndex(),
+		LastLogIndex:  GetLastLogIndex(), 
+		LastLogTerm:   GetLastLogTerm(),
 		CandidateName: serverHostPort,
 	}
 
@@ -231,7 +231,7 @@ func handleTimeOut(){
 	if err != nil {
 		log.Fatal("Error when sending voteRequest")
 	}
-	updateServersKnowledge() // Update the knowledge of which servers are up
+	// To request for votes
 	broadcastMessage(msg)
 }
 
@@ -323,6 +323,8 @@ func handleMessage(data []byte){
 
 /* Function to broadcast msg to all servers that are in the server list */
 func broadcastMessage(data []byte){
+	updateServersKnowledge() // To update list of known servers
+
 	// Iterate over the server addresses
 	for _, addr := range servers {
 		if addr != serverHostPort {
@@ -360,26 +362,16 @@ func handleCommandName(message miniraft.Raft_CommandName) {
 	} else if leader == serverHostPort {
 		// Send out the command name to the others		
 		// Create a log object
-		
+		// TODO: Create log object	
 
 	} else {
-		// Forward the message to the leader of the cluster
-		conn, err := net.ListenPacket("udp", ":0")
-		if err != nil {
-			log.Fatal(err)
-		}
-		dst, err := net.ResolveUDPAddr("udp", leader)
-		if err != nil {
-			log.Fatal(err)
-		}
 		// wrap the command in a raft message
 		message := &miniraft.Raft{
 			Message: &miniraft.Raft_CommandName{
 				CommandName: message.CommandName,
 			},
 		}
-
-		SendMiniRaftMessage(conn, dst, message)
+		SendMiniRaftMessage(leader, message)
 	}
 }
 
@@ -391,12 +383,57 @@ func handleAppendEntriesResponse(message miniraft.Raft_AppendEntriesResponse) {
 
 }
 
+// If receiving a request vote 
 func handleRequestVoteRequest(message miniraft.Raft_RequestVoteRequest){
+	// Check if server has the pre-requisite to be voted
+	// Choose candidate with log most likely to contain all committed entries
+	// This is achieved by comparing logs
+	var vote miniraft.RequestVoteResponse;
 
+	if (message.RequestVoteRequest.LastLogTerm < GetLastLogTerm() ||
+	(message.RequestVoteRequest.LastLogTerm == GetLastLogTerm() &&
+	message.RequestVoteRequest.LastLogIndex < GetLastLogIndex() )){
+		// Do not give vote to candidate since he is out-dated
+		vote = miniraft.RequestVoteResponse{
+			Term:          uint64(term), // To update candidate
+			VoteGranted:   false,
+		}
+	} else {
+		// Send a vote to the candidate
+		vote = miniraft.RequestVoteResponse{
+			Term:          message.RequestVoteRequest.GetTerm(), // Take candidate's term
+			VoteGranted:   true,
+		}
+
+		// Update own term
+		term = int(message.RequestVoteRequest.GetTerm())
+	}
+
+	// Create Message wrapper for raft message
+	voteResponse := &miniraft.Raft{
+		Message: &miniraft.Raft_RequestVoteResponse{
+			RequestVoteResponse: &vote,
+		},
+	}	
+
+	// Send message to candidate
+	SendMiniRaftMessage(message.RequestVoteRequest.GetCandidateName(), voteResponse)
 }
 
 func handleRequestVoteResponse(message miniraft.Raft_RequestVoteResponse){
-
+	// Check if state is still candidate
+	updateServersKnowledge()
+	if state == Candidate {
+		// Count up if vote received is granted
+		if message.RequestVoteResponse.VoteGranted {
+			voteReceived++
+			if voteReceived > len(servers) / 2 {
+				// Received majority
+				// Send heartbeat to tell servers, this is the new leader
+				
+			}
+		}
+	}
 }
 //=========================================
 //=========================================
@@ -404,35 +441,18 @@ func handleRequestVoteResponse(message miniraft.Raft_RequestVoteResponse){
 //=========================================
 //=========================================
 
-/*
-Function update the current server's knowledge of other servers 
-*/
-func updateServersKnowledge(){
-	// Open the file in read-only mode
-	file, err := os.Open(serversFile)
-	if err != nil {
-		log.Fatalf("Failed to open the file: %v", err)
-	}
-	defer file.Close()
-
-	// Reset servers variable
-	servers = nil
-
-	// Use bufio.Scanner to read the file line by line
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		// Add the line to the servers slice
-		servers = append(servers, scanner.Text())
-	}
-
-	// Check for any errors that occurred during the scan
-	if err := scanner.Err(); err != nil {
-		log.Fatalf("Error occurred during file scan: %v", err)
-	}
-}
-
 // Function to send the miniraft message
-func SendMiniRaftMessage(conn net.PacketConn, addr *net.UDPAddr, message *miniraft.Raft) (err error) {
+func SendMiniRaftMessage(ipPortAddr string, message *miniraft.Raft) (err error) {
+	conn, err := net.ListenPacket("udp", ":0")
+	if err != nil {
+		log.Fatal(err)
+	}	
+
+	addr, err := net.ResolveUDPAddr("udp", ipPortAddr)
+		if err != nil {
+			log.Fatal(err)
+		}
+
 	// Serialize the message
 	data, err := proto.Marshal(message)
 	log.Printf("SendMiniRaftMessage(): sending %s (%v), %d to %s\n", message, data, len(data), addr.String())
@@ -449,13 +469,44 @@ func SendMiniRaftMessage(conn net.PacketConn, addr *net.UDPAddr, message *minira
 	return
 }
 
-func GetLastLogIndex() uint64{
+func GetLastLogIndex() uint64 {
+	if (len(logs) < 1) {
+		return 0
+	}
+	return logs[len(logs) - 1].Index
+}
+
+func GetLastLogTerm() uint64 {
 	if len(logs) < 1 {
 		return 0
 	}
 	return logs[len(logs) - 1].Term
 }
 
+func updateServersKnowledge(){
+	// Open the file in read-only mode
+	file, err := os.Open(serversFile)
+	if err != nil {
+		log.Panicf("Failed to open the file: %v", err)
+	}
+	defer file.Close()
+
+	// Reset servers variable
+	servers = nil
+
+	// Use bufio.Scanner to read the file line by line
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		// Add the line to the servers slice
+		servers = append(servers, scanner.Text())
+	}
+	// Check for any errors that occurred during the scan
+	if err := scanner.Err(); err != nil {
+		log.Fatalf("Error occurred during file scan: %v", err)
+	}
+
+
+}
 //=========================================
 //=========================================
 // Server Main
