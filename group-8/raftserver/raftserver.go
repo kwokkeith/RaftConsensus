@@ -33,16 +33,24 @@ var (
 	mutex sync.Mutex
 	timerMutex sync.Mutex
 	timerIsActive bool = false;
-	serverHostPort string
+	serverHostPort string = ""
 	serverAddr *net.UDPAddr
 	timeOut int
 	state ServerState = Follower // Start as a follower
+	suspended bool = false // To state if a state has been suspended
 	serversFile string // Path to the persistent storage of the list of servers
 	term int = 0
-	lastLogIndex int = 0
+	nextLogIndex int = 1 // Next log entry for the current server
+	nextIndex map[string]int // List of servers and their index of the next log entry to be sent to that server
+	matchIndex map[string]int // List of servers and their index of highest log entry known to be replicated (commitIndex)
 	lastLogTerm int = 0
 	timeOutCounter time.Timer; 
 	servers []string
+	leader string = ""
+	leaderVotedFor string = ""
+	logs []miniraft.LogEntry
+	commitIndex int = 0
+	lastAppliedIndex int = 0
 )
 
 //=========================================
@@ -148,8 +156,44 @@ func startCommandInterface() {
 				fmt.Println("Exiting Server Process.") 
 				log.Printf("[startCommandInterface] Exit command received. serverHostPort: %s", serverHostPort)
 				os.Exit(0)
+			case "log":
+				fmt.Printf("Log Entries for %s:\n", serverHostPort)
+				fmt.Printf("| %10s | %10s | %s\n", "Index", "Term", "CommandName")
+				fmt.Printf("|%s|\n", strings.Repeat("-", 40))
+				for _, log := range logs {
+					fmt.Printf("| %10s | %10s | %s\n", string(rune(log.Index)), string(rune(log.Term)), log.CommandName)
+				}
+			case "print":
+				fmt.Printf("Summary of %s\n", serverHostPort)
+				fmt.Printf("Current Term: %s\n", string(rune(term)))
+				fmt.Printf("Leader voted for: %s\n", string(leaderVotedFor))
+				fmt.Printf("State: %s\n", string(rune(state)))
+				fmt.Printf("Commit Index: %s\n", string(rune(commitIndex)))
+				fmt.Printf("Last Applied Index: %s\n", string(rune(lastAppliedIndex)))
+				fmt.Printf("Next Index:\n")
+				for key, value := range nextIndex {
+					fmt.Printf("%s : %s\n", key, string(rune(value)))
+				} 
+				fmt.Printf("Match Index:\n")
+				for key, value := range matchIndex {
+					fmt.Printf("%s : %s\n", key, string(rune(value)))
+				}
+			case "resume":
+				if suspended {
+					fmt.Println("Resuming server")
+					suspended = false
+				} else {
+					fmt.Println("Server was not in suspended state")
+				}	
+			case "suspend":
+				if suspended {
+					fmt.Println("Server is already suspended")
+				} else {
+					fmt.Println("Suspending Server")
+					suspended = true
+				}
 			default:
-				// TODO: implement different commands of server
+				fmt.Println("Command is unrecognised")
 				return
 		}
 	}
@@ -170,8 +214,8 @@ func handleTimeOut(){
 	// Create an instance of RequestVoteRequest
 	request := &miniraft.RequestVoteRequest{
 		Term:          uint64(term) + 1, // Add one to the term when becoming a candidate
-		LastLogIndex:  uint64(lastLogIndex),
-		LastLogTerm:   uint64(lastLogTerm),
+		LastLogIndex:  uint64(nextLogIndex - 1), 
+		LastLogTerm:   GetLastLogIndex(),
 		CandidateName: serverHostPort,
 	}
 
@@ -254,16 +298,18 @@ func handleMessage(data []byte){
 	// Switch between different types of protobuf message
 	mutex.Lock() 
 	defer mutex.Unlock() // Release the mutex
+	if suspended {
+		fmt.Println("Received message but suspended.")
+		return 
+	}
 	switch msg := message.Message.(type) {
 	case *miniraft.Raft_CommandName:
 		fmt.Println("Received CommandName response: ", msg.CommandName)
-		handleCommandName(*msg)
 	case *miniraft.Raft_AppendEntriesRequest:
 		fmt.Println("Received AppendEntriesRequest: ", msg.AppendEntriesRequest)
 		handleAppendEntriesRequest(*msg)
 	case *miniraft.Raft_AppendEntriesResponse:
 		fmt.Println("Received AppendEntriesResponse: ", msg.AppendEntriesResponse)	
-		handleAppendEntriesResponse(*msg)
 	case *miniraft.Raft_RequestVoteRequest:
 		fmt.Println("Received AppendEntriesResponse: ", msg.RequestVoteRequest)	
 		handleRequestVoteRequest(*msg)
@@ -306,7 +352,35 @@ func broadcastMessage(data []byte){
 //=========================================
 
 func handleCommandName(message miniraft.Raft_CommandName) {
-	
+	// Check if current leader is this server
+	if leader == "" {
+		// if leader has not been established
+		// drop the message (Could also buffer it)
+		return 
+	} else if leader == serverHostPort {
+		// Send out the command name to the others		
+		// Create a log object
+		
+
+	} else {
+		// Forward the message to the leader of the cluster
+		conn, err := net.ListenPacket("udp", ":0")
+		if err != nil {
+			log.Fatal(err)
+		}
+		dst, err := net.ResolveUDPAddr("udp", leader)
+		if err != nil {
+			log.Fatal(err)
+		}
+		// wrap the command in a raft message
+		message := &miniraft.Raft{
+			Message: &miniraft.Raft_CommandName{
+				CommandName: message.CommandName,
+			},
+		}
+
+		SendMiniRaftMessage(conn, dst, message)
+	}
 }
 
 func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
@@ -355,6 +429,31 @@ func updateServersKnowledge(){
 	if err := scanner.Err(); err != nil {
 		log.Fatalf("Error occurred during file scan: %v", err)
 	}
+}
+
+// Function to send the miniraft message
+func SendMiniRaftMessage(conn net.PacketConn, addr *net.UDPAddr, message *miniraft.Raft) (err error) {
+	// Serialize the message
+	data, err := proto.Marshal(message)
+	log.Printf("SendMiniRaftMessage(): sending %s (%v), %d to %s\n", message, data, len(data), addr.String())
+	if err != nil {
+		log.Panicln("Failed to marshal message.", err)
+	}
+
+	// Send the message over, we dont need to send the size of the message as UDP handles it,
+	// but we need to specify the address of where we are sending it to as UDP is stateless and it doesnt rmb where data should be sent 
+	_, err = conn.WriteTo(data, addr)
+	if err != nil {
+		log.Panicln("Failed to send message.", err)
+	}
+	return
+}
+
+func GetLastLogIndex() uint64{
+	if len(logs) < 1 {
+		return 0
+	}
+	return logs[len(logs) - 1].Term
 }
 
 //=========================================
