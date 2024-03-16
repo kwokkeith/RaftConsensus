@@ -51,6 +51,7 @@ var (
 	commitIndex int = 0
 	lastAppliedIndex int = 0
 	voteReceived int // Count number of votes received for this term
+	hearbeatInterval int = 5;
 )
 
 //=========================================
@@ -87,8 +88,8 @@ func startServer(serverHostPort string){
 	serverAddr = addr
 
 	// Generate random timeout
-	minTimeOut := 100000;
-	maxTimeOut := 1000000000;
+	minTimeOut := 10;
+	maxTimeOut := 100;
 	timeOut = rand.Intn(maxTimeOut - minTimeOut + 1) + minTimeOut
 
 	// Start communication (looped to keep listening until exit)
@@ -161,23 +162,25 @@ func startCommandInterface() {
 				fmt.Printf("| %10s | %10s | %s\n", "Index", "Term", "CommandName")
 				fmt.Printf("|%s|\n", strings.Repeat("-", 40))
 				for _, log := range logs {
-					fmt.Printf("| %10s | %10s | %s\n", string(rune(log.Index)), string(rune(log.Term)), log.CommandName)
+					fmt.Printf("| %10d | %10d | %s\n", log.Index, log.Term, log.CommandName)
 				}
 			case "print":
 				fmt.Printf("Summary of %s\n", serverHostPort)
-				fmt.Printf("Current Term: %s\n", string(rune(term)))
+				fmt.Printf("Current Term: %d\n", term)
 				fmt.Printf("Leader voted for: %s\n", string(leaderVotedFor))
-				fmt.Printf("State: %s\n", string(rune(state)))
-				fmt.Printf("Commit Index: %s\n", string(rune(commitIndex)))
-				fmt.Printf("Last Applied Index: %s\n", string(rune(lastAppliedIndex)))
+				fmt.Printf("State: %d\n", state)
+				fmt.Printf("Commit Index: %d\n", commitIndex)
+				fmt.Printf("Last Applied Index: %d\n", lastAppliedIndex)
 				fmt.Printf("Next Index:\n")
 				for key, value := range nextIndex {
-					fmt.Printf("%s : %s\n", key, string(rune(value)))
+					fmt.Printf("%s : %d\n", key, value)
 				} 
 				fmt.Printf("Match Index:\n")
 				for key, value := range matchIndex {
-					fmt.Printf("%s : %s\n", key, string(rune(value)))
+					fmt.Printf("%s : %d\n", key, value)
 				}
+				fmt.Printf("Timeout: %d\n", timeOut)
+				fmt.Printf("Current Leader: %s\n", leader)
 			case "resume":
 				if suspended {
 					fmt.Println("Resuming server")
@@ -194,7 +197,6 @@ func startCommandInterface() {
 				}
 			default:
 				fmt.Println("Command is unrecognised")
-				return
 		}
 	}
 }
@@ -212,8 +214,9 @@ func handleTimeOut(){
 
 	// Send out votes
 	// Create an instance of RequestVoteRequest
+	term++ // Update term for election
 	request := &miniraft.RequestVoteRequest{
-		Term:          uint64(term) + 1, // Add one to the term when becoming a candidate
+		Term:          uint64(term), // Add one to the term when becoming a candidate
 		LastLogIndex:  GetLastLogIndex(), 
 		LastLogTerm:   GetLastLogTerm(),
 		CandidateName: serverHostPort,
@@ -226,13 +229,8 @@ func handleTimeOut(){
 		},
 	}
 
-	// Send vote Request to other followers
-	msg, err := proto.Marshal(message)
-	if err != nil {
-		log.Fatal("Error when sending voteRequest")
-	}
 	// To request for votes
-	broadcastMessage(msg)
+	broadcastMessage(message)
 }
 
 //=========================================
@@ -270,10 +268,13 @@ func handleCommunication(){
 			timerIsActive = false
 		}
 
-		// Start a timer for time to check timeout
-		timerIsActive = true
-		timeOutCounter = *time.AfterFunc(time.Duration(timeOut), handleTimeOut);
+		// Start a timer for time to check timeout if current server is not a leader
+		if state != Leader {
+			timerIsActive = true
+			timeOutCounter = *time.AfterFunc(time.Second*time.Duration(timeOut), handleTimeOut);
+		}
 		timerMutex.Unlock()
+		
 
 		// Debug message to check message received
 		log.Printf("From %s: %v\n", addr.String(), data[:length])
@@ -311,19 +312,25 @@ func handleMessage(data []byte){
 	case *miniraft.Raft_AppendEntriesResponse:
 		fmt.Println("Received AppendEntriesResponse: ", msg.AppendEntriesResponse)	
 	case *miniraft.Raft_RequestVoteRequest:
-		fmt.Println("Received AppendEntriesResponse: ", msg.RequestVoteRequest)	
+		fmt.Println("Received RequestVoteRequest: ", msg.RequestVoteRequest)	
 		handleRequestVoteRequest(*msg)
 	case *miniraft.Raft_RequestVoteResponse:
-		fmt.Println("Received AppendEntriesResponse: ", msg.RequestVoteResponse)
+		fmt.Println("Received RequestVoteResponse: ", msg.RequestVoteResponse)
 		handleRequestVoteResponse(*msg)
 	default:
-		log.Printf("[handleConnection] Received an unknown type of message: %T", msg)
+		log.Printf("[handleMessage] Received an unknown type of message: %T", msg)
 	}
 }
 
 /* Function to broadcast msg to all servers that are in the server list */
-func broadcastMessage(data []byte){
+func broadcastMessage(message *miniraft.Raft){
 	updateServersKnowledge() // To update list of known servers
+
+	// Send vote Request to other followers
+	msg, err := proto.Marshal(message)
+	if err != nil {
+		log.Fatal("Error when sending message")
+	}
 
 	// Iterate over the server addresses
 	for _, addr := range servers {
@@ -336,7 +343,7 @@ func broadcastMessage(data []byte){
 			defer conn.Close()
 	
 			// Send a message to the server
-			_, err = conn.Write([]byte(data))
+			_, err = conn.Write([]byte(msg))
 			if err != nil {
 				log.Printf("Failed to send message to %s: %v", addr, err)
 				continue
@@ -376,7 +383,78 @@ func handleCommandName(message miniraft.Raft_CommandName) {
 }
 
 func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
+	var success = true
+
+	// Set leader
+	leader = message.AppendEntriesRequest.LeaderId
+
+	// Checks to get success result for Response message
+	if message.AppendEntriesRequest.GetTerm() < uint64(term) {
+		success = false
+	} 
 	
+	if len(logs) >= int(message.AppendEntriesRequest.GetPrevLogIndex()) {
+		if message.AppendEntriesRequest.GetPrevLogIndex() != 0 {
+			// Check if logs contains an entry at prevLogIndex whose term matches prevLogTerm
+			if logs[message.AppendEntriesRequest.GetPrevLogIndex()-1].GetTerm() != message.AppendEntriesRequest.GetPrevLogTerm() {
+				success = false
+			}
+		}
+	}
+
+	// Check if there are conflicts in existing entry with new ones, delete the existing entry and all that follows it
+	for _, newEntry := range message.AppendEntriesRequest.GetEntries() {
+		// Check length of log
+		if len(logs) < int(newEntry.GetIndex()){
+			continue
+		}
+		if logs[newEntry.GetIndex() - 1].GetTerm() != message.AppendEntriesRequest.GetTerm() {
+			// Delete the existing entries that follow it
+			logs = logs[:newEntry.GetIndex() - 1]
+		}
+	}
+
+	// Append any new entries not already in the log
+	for _, newEntry := range message.AppendEntriesRequest.GetEntries() {
+		// Check if there is an entry at the index of the new entry
+		// If newEntry's index is more than the length of the log
+		if len(logs) < int(newEntry.GetIndex()) {
+			// append new logs (But we need to check if they have prev log)
+			// ***************************************************
+			// ***************************************************
+			// TODO: Implement appending algorithm where there needs to be a prev entry
+			// ***************************************************	
+			// ***************************************************
+			// message before appending to log.
+		}
+	}
+
+	// Update commitIndex
+	if message.AppendEntriesRequest.GetLeaderCommit() > uint64(commitIndex) {
+		var lastNewEntryIndex = message.AppendEntriesRequest.GetEntries()[len(message.AppendEntriesRequest.GetEntries())-1].Index
+		if message.AppendEntriesRequest.GetLeaderCommit() < lastNewEntryIndex {
+			commitIndex = int(message.AppendEntriesRequest.GetLeaderCommit())
+		} else {
+			commitIndex = int(lastNewEntryIndex)
+		}
+	}
+
+	// Update term
+	term = max(term, int(message.AppendEntriesRequest.GetTerm()))
+
+	// Server response to appendEntriesRPC
+	response := &miniraft.AppendEntriesResponse{
+		Term:          uint64(term), // Add one to the term when becoming a candidate
+		Success:  success, 
+	}
+	
+	responseMsg := &miniraft.Raft{
+		Message: &miniraft.Raft_AppendEntriesResponse{
+			AppendEntriesResponse: response,
+		},
+	}
+
+	SendMiniRaftMessage(leader, responseMsg)
 }
 
 func handleAppendEntriesResponse(message miniraft.Raft_AppendEntriesResponse) {
@@ -400,6 +478,8 @@ func handleRequestVoteRequest(message miniraft.Raft_RequestVoteRequest){
 		}
 	} else {
 		// Send a vote to the candidate
+		leaderVotedFor = message.RequestVoteRequest.CandidateName
+
 		vote = miniraft.RequestVoteResponse{
 			Term:          message.RequestVoteRequest.GetTerm(), // Take candidate's term
 			VoteGranted:   true,
@@ -420,6 +500,7 @@ func handleRequestVoteRequest(message miniraft.Raft_RequestVoteRequest){
 	SendMiniRaftMessage(message.RequestVoteRequest.GetCandidateName(), voteResponse)
 }
 
+
 func handleRequestVoteResponse(message miniraft.Raft_RequestVoteResponse){
 	// Check if state is still candidate
 	updateServersKnowledge()
@@ -430,11 +511,14 @@ func handleRequestVoteResponse(message miniraft.Raft_RequestVoteResponse){
 			if voteReceived > len(servers) / 2 {
 				// Received majority
 				// Send heartbeat to tell servers, this is the new leader
-				
+				SendHeartBeat();				
+				state = Leader; // Become the new leader
+				leader = serverHostPort // Update who the current leader is
 			}
 		}
 	}
 }
+
 //=========================================
 //=========================================
 // Server Utilities
@@ -504,8 +588,26 @@ func updateServersKnowledge(){
 	if err := scanner.Err(); err != nil {
 		log.Fatalf("Error occurred during file scan: %v", err)
 	}
+}
 
+/* This function is used for the leader to send heartbeats */
+func SendHeartBeat(){
+	request := miniraft.AppendEntriesRequest{
+		Term: uint64(term),
+		LeaderId: serverHostPort,
+		PrevLogIndex: GetLastLogIndex(),
+		PrevLogTerm: GetLastLogTerm(),
+		Entries: nil,
+		LeaderCommit: uint64(commitIndex),
+	}
 
+	// wrap the request in a raft message(AppendEntriesRequest)
+	message := &miniraft.Raft{
+		Message: &miniraft.Raft_AppendEntriesRequest{
+			AppendEntriesRequest: &request,
+		},
+	}
+	broadcastMessage(message)
 }
 //=========================================
 //=========================================
