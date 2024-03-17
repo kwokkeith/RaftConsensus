@@ -37,6 +37,8 @@ var (
 	serverHostPort string = ""
 	serverAddr *net.UDPAddr
 	timeOut int
+	minTimeOut int = 10;
+	maxTimeOut int = 100;
 	state ServerState = Follower // Start as a follower
 	suspended bool = false // To state if a state has been suspended
 	serversFile string // Path to the persistent storage of the list of servers
@@ -51,7 +53,7 @@ var (
 	logs []miniraft.LogEntry
 	commitIndex int = 0
 	lastAppliedIndex int = 0
-	voteReceived int // Count number of votes received for this term
+	voteReceived int = 1// Count number of votes received for this term
 	hearbeatInterval int = 5;
 	heartbeatTimerIsActive bool = false;
 )
@@ -90,8 +92,6 @@ func startServer(serverHostPort string){
 	serverAddr = addr
 
 	// Generate random timeout
-	minTimeOut := 10;
-	maxTimeOut := 100;
 	timeOut = rand.Intn(maxTimeOut - minTimeOut + 1) + minTimeOut
 
 	// Start communication (looped to keep listening until exit)
@@ -233,6 +233,9 @@ func handleTimeOut(){
 			RequestVoteRequest: request,
 		},
 	}
+
+	// Set new random timeOut for leader
+	timeOut = rand.Intn(maxTimeOut - minTimeOut + 1) + minTimeOut
 
 	// To request for votes
 	broadcastMessage(message)
@@ -495,6 +498,9 @@ func handleRequestVoteRequest(message miniraft.Raft_RequestVoteRequest){
 		term = int(message.RequestVoteRequest.GetTerm())
 	}
 
+	// Set new random timeout
+	timeOut = rand.Intn(maxTimeOut - minTimeOut + 1) + minTimeOut 
+
 	// Create Message wrapper for raft message
 	voteResponse := &miniraft.Raft{
 		Message: &miniraft.Raft_RequestVoteResponse{
@@ -521,7 +527,7 @@ func handleRequestVoteResponse(message miniraft.Raft_RequestVoteResponse){
 				state = Leader; // Become the new leader
 				SetHeartBeatRoutine(); // Routinely send heartbeat
 				leader = serverHostPort // Update who the current leader is
-				voteReceived = 0 // Reset counter
+				voteReceived = 1 // Reset counter (1 because leader votes for himself)
 				
 				// Stop timer too for timeout
 				timerMutex.Lock()
