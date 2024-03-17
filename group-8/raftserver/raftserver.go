@@ -52,7 +52,7 @@ var (
 	leaderVotedFor string = ""
 	logs []miniraft.LogEntry
 	commitIndex int = 0
-	lastAppliedIndex int = 0
+	lastAppliedIndex int = 0 // Similar to commitIndex in this assignment
 	voteReceived int = 1// Count number of votes received for this term
 	hearbeatInterval int = 5;
 	heartbeatTimerIsActive bool = false;
@@ -368,7 +368,37 @@ func handleCommandName(message miniraft.Raft_CommandName) {
 		// Send out the command name to the others		
 		// Create a log object
 		// TODO: Create log object	
+		logEntry := miniraft.LogEntry{
+			Index: uint64(len(logs)) + 1,
+			Term: uint64(term),
+			CommandName: message.CommandName,
+		}
 
+		// Get last log index and term before sending out AppendEntriesRequest
+		var prevLogIndex = GetLastLogIndex()
+		var prevLogTerm = GetLastLogTerm()
+
+		logs = append(logs, logEntry) // Leader adds command to its log
+
+		// Leader sends AppendEntries to  message to followers
+		request := miniraft.AppendEntriesRequest{
+			Term: uint64(term),
+			LeaderId: serverHostPort,
+			PrevLogIndex: prevLogIndex,
+			PrevLogTerm: prevLogTerm,
+			Entries: []*miniraft.LogEntry{
+				&logEntry,
+			},
+			LeaderCommit: uint64(commitIndex),
+		}
+
+		message := &miniraft.Raft{
+			Message: &miniraft.Raft_AppendEntriesRequest{
+				AppendEntriesRequest: &request,
+			},
+		}
+
+		broadcastMessage(message)
 	} else {
 		// wrap the command in a raft message
 		message := &miniraft.Raft{
