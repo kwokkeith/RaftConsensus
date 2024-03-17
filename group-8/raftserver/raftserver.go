@@ -392,6 +392,13 @@ func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
 			state = Follower
 			term = int(message.AppendEntriesRequest.GetTerm())
 		}
+	} else if state == Candidate {
+		// If this server is a candidate then it yields to another candidate that has became a leader
+		if message.AppendEntriesRequest.GetTerm() >= uint64(term) {
+			leader = message.AppendEntriesRequest.GetLeaderId()
+			state = Follower
+			term = int(message.AppendEntriesRequest.GetTerm())	
+		}
 	} else {
 		leader = message.AppendEntriesRequest.GetLeaderId()
 	}
