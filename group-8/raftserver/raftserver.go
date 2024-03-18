@@ -38,7 +38,7 @@ var (
 	serverAddr *net.UDPAddr
 	timeOut int
 	minTimeOut int = 10;
-	maxTimeOut int = 100;
+	maxTimeOut int = 20;
 	state ServerState = Follower // Start as a follower
 	suspended bool = false // To state if a state has been suspended
 	serversFile string // Path to the persistent storage of the list of servers
@@ -299,6 +299,7 @@ func handleMessage(data []byte){
 	switch msg := message.Message.(type) {
 	case *miniraft.Raft_CommandName:
 		fmt.Println("Received CommandName response: ", msg.CommandName)
+		handleCommandName(*msg)
 	case *miniraft.Raft_AppendEntriesRequest:
 		fmt.Println("Received AppendEntriesRequest: ", msg.AppendEntriesRequest)
 		handleAppendEntriesRequest(*msg)
@@ -323,6 +324,8 @@ func broadcastMessage(message *miniraft.Raft){
 	if suspended {
 		return
 	}
+
+	log.Printf("Broadcasing message...\n")
 
 	// Send vote Request to other followers
 	msg, err := proto.Marshal(message)
@@ -562,7 +565,7 @@ func handleRequestVoteResponse(message miniraft.Raft_RequestVoteResponse){
 				// Send heartbeat to tell servers, this is the new leader
 				SendHeartBeat();				
 				state = Leader; // Become the new leader
-				SetHeartBeatRoutine(); // Routinely send heartbeat
+				go SetHeartBeatRoutine(); // Routinely send heartbeat
 				leader = serverHostPort // Update who the current leader is
 				voteReceived = 1 // Reset counter (1 because leader votes for himself)
 				
