@@ -623,7 +623,7 @@ func handleAppendEntriesResponse(message miniraft.Raft_AppendEntriesResponse, se
 	} else {
 		// Update index of highest log entry known to be replicated by the follower
 		matchIndex[senderAddress] = nextIndex[senderAddress]
-		
+	
 		// Increment the follower's next index to be sent if it is not already the last entry in the leader
 		if nextIndex[senderAddress] != len(logs) + 1{
 			nextIndex[senderAddress]++;
@@ -646,6 +646,33 @@ func handleAppendEntriesResponse(message miniraft.Raft_AppendEntriesResponse, se
 			}
 		}
 		commitIndex--
+
+		// If nextIndex[senderAddress] is now equal to that of the server's then do not send request again, else send next request
+		if nextIndex[senderAddress] == len(logs) + 1 {
+			return
+		}
+		// Else send the next request
+		// Prepare entry to resend
+		request := miniraft.AppendEntriesRequest{
+			Term: uint64(term),
+			LeaderId: serverHostPort,
+			PrevLogIndex: uint64(nextIndex[senderAddress] - 1),
+			PrevLogTerm: (logs[nextIndex[senderAddress] - 1 - 1]).GetTerm(),
+			Entries: []*miniraft.LogEntry{
+				&logs[nextIndex[senderAddress] - 1],
+			},
+			LeaderCommit: uint64(commitIndex),
+		}
+	
+		// wrap the request in a raft message(AppendEntriesRequest)
+		message := &miniraft.Raft{
+			Message: &miniraft.Raft_AppendEntriesRequest{
+				AppendEntriesRequest: &request,
+			},
+		}	
+
+		// Send message to response server
+		SendMiniRaftMessage(senderAddress, message)
 	}
 
 }
