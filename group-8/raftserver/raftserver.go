@@ -250,10 +250,21 @@ func handleTimeOut(){
 /* This function sets up the listening port for the server to receive
 messages from other servers */
 func handleCommunication(){
-	listener, err := net.ListenUDP("udp", serverAddr)
-	if err != nil { 
+	addr, err := net.ResolveUDPAddr("udp", serverHostPort)
+	if err != nil {
 		log.Fatal(err)
 	}
+	
+	listener, err := net.ListenUDP("udp", addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	
+	// listener, err := net.ListenUDP("udp", serverAddr)
+	// if err != nil { 
+	// 	log.Fatal(err)
+	// }
 
 	// Start Communication
 	for { 
@@ -302,7 +313,7 @@ func handleMessage(data []byte, senderAddress string){
 		fmt.Println("Received CommandName response: ", msg.CommandName)
 		handleCommandName(*msg)
 	case *miniraft.Raft_AppendEntriesRequest:
-		fmt.Println("Received AppendEntriesRequest: ", msg.AppendEntriesRequest)
+		fmt.Printf("Received AppendEntriesRequest from %s: %s\n", senderAddress, msg.AppendEntriesRequest)
 		handleAppendEntriesRequest(*msg)
 	case *miniraft.Raft_AppendEntriesResponse:
 		fmt.Println("Received AppendEntriesResponse: ", msg.AppendEntriesResponse)	
@@ -336,23 +347,70 @@ func broadcastMessage(message *miniraft.Raft){
 	// Iterate over the server addresses
 	for _, addr := range servers {
 		if addr != serverHostPort {
-			conn, err := net.Dial("udp", addr)
+			dst, err := net.ResolveUDPAddr("udp", addr)
 			if err != nil {
-				log.Printf("Failed to dial UDP server %s: %v", addr, err)
+				log.Fatal(err)
+			}
+
+			// Resolve the local address your server is listening on
+			lAddr, err := net.ResolveUDPAddr("udp", serverHostPort)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			conn, err := net.DialUDP("udp", lAddr, dst)
+			if err != nil {
+				log.Printf("Failed to dial UDP server %s: %v", dst, err)
 				continue
 			}
-			defer conn.Close()
-	
+
 			// Send a message to the server
 			_, err = conn.Write([]byte(msg))
 			if err != nil {
-				log.Printf("Failed to send message to %s: %v", addr, err)
+				log.Printf("Failed to send message to %s: %v", dst, err)
 				continue
 			}
 	
+			conn.Close()
+
 			fmt.Printf("Message sent to %s\n", addr)
 		}
 	}
+}
+
+// Function to send the miniraft message
+func SendMiniRaftMessage(ipPortAddr string, message *miniraft.Raft) (err error) {
+	dst, err := net.ResolveUDPAddr("udp", ipPortAddr)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+	// Resolve the local address your server is listening on
+	lAddr, err := net.ResolveUDPAddr("udp", serverHostPort)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	conn, err := net.DialUDP("udp", lAddr, dst)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer conn.Close()
+
+	// Serialize the message
+	data, err := proto.Marshal(message)
+	log.Printf("SendMiniRaftMessage(): sending %s, %d to %s\n", message, len(data), dst.String())
+	if err != nil {
+		log.Panicln("Failed to marshal message.", err)
+	}
+
+	// Send the message over, we dont need to send the size of the message as UDP handles it,
+	// but we need to specify the address of where we are sending it to as UDP is stateless and it doesnt rmb where data should be sent 
+	_, err = conn.Write(data)
+	if err != nil {
+		log.Panicln("Failed to send message.", err)
+	}
+	return
 }
 
 //=========================================
@@ -566,8 +624,10 @@ func handleAppendEntriesResponse(message miniraft.Raft_AppendEntriesResponse, se
 		// Update index of highest log entry known to be replicated by the follower
 		matchIndex[senderAddress] = nextIndex[senderAddress]
 		
-		// Increment the follower's next index to be sent
-		nextIndex[senderAddress]++;
+		// Increment the follower's next index to be sent if it is not already the last entry in the leader
+		if nextIndex[senderAddress] != len(logs) + 1{
+			nextIndex[senderAddress]++;
+		}
 		
 		// Update commitIndex of leader
 		for commitIndex <= len(logs){
@@ -712,35 +772,6 @@ func resetTimer() {
         timerIsActive = false
         timerMutex.Unlock()
     })
-}
-
-
-// Function to send the miniraft message
-func SendMiniRaftMessage(ipPortAddr string, message *miniraft.Raft) (err error) {
-	conn, err := net.ListenPacket("udp", ":0")
-	if err != nil {
-		log.Fatal(err)
-	}	
-
-	addr, err := net.ResolveUDPAddr("udp", ipPortAddr)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-	// Serialize the message
-	data, err := proto.Marshal(message)
-	log.Printf("SendMiniRaftMessage(): sending %s (%v), %d to %s\n", message, data, len(data), addr.String())
-	if err != nil {
-		log.Panicln("Failed to marshal message.", err)
-	}
-
-	// Send the message over, we dont need to send the size of the message as UDP handles it,
-	// but we need to specify the address of where we are sending it to as UDP is stateless and it doesnt rmb where data should be sent 
-	_, err = conn.WriteTo(data, addr)
-	if err != nil {
-		log.Panicln("Failed to send message.", err)
-	}
-	return
 }
 
 func GetLastLogIndex() uint64 {
