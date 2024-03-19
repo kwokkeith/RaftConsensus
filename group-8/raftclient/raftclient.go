@@ -165,12 +165,15 @@ func sendCommand(command []byte) {
 	// Lock to prevent any other server action while sending command
 	mutex.Lock()
 	defer mutex.Unlock()
+	log.Printf("Sending command to server at %s\n", destinationAddr.String()) 
 
 	// Sends command through UDP connection
 	_, err := connection.WriteTo(command, destinationAddr)
 	if err != nil {
 		log.Fatal(err)
-	}	
+	} else { 
+		log.Printf("Command sent to server at %s\n", destinationAddr.String())
+	}
 } 
 
 //=========================================
