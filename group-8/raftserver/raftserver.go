@@ -23,41 +23,39 @@ import (
 
 // For serverstate
 type ServerState int
-
 const (
-	Leader    ServerState = iota // 0
-	Follower                     // 1
-	Candidate                    // 2
+    Leader ServerState = iota // 0
+    Follower // 1
+    Candidate // 2
 )
 
 var (
-	mutex               sync.Mutex
-	timerMutex          sync.Mutex
+	mutex sync.Mutex
+	timerMutex sync.Mutex
 	heartbeatTimerMutex sync.Mutex
-	timerIsActive       bool   = false
-	serverHostPort      string = ""
-	// serverAddr          *net.UDPAddr
-	timeOut     int
-	minTimeOut  int         = 10
-	maxTimeOut  int         = 20
-	state       ServerState = Follower // Start as a follower
-	suspended   bool        = false    // To state if a state has been suspended
-	serversFile string                 // Path to the persistent storage of the list of servers
-	term        int         = 0
-	// nextLogIndex int = 1 // Next log entry for the current server
-	nextIndex              map[string]int = make(map[string]int) // List of servers and their index of the next log entry to be sent to that server
-	matchIndex             map[string]int = make(map[string]int) // List of servers and their index of highest log entry known to be replicated (commitIndex)
-	timeOutCounter         *time.Timer
-	servers                []string      // string of all ip:port of servers present in network
-	leader                 string   = "" // IP:Port address of the leader
-	leaderVotedFor         string   = ""
-	logs                   []miniraft.LogEntry
-	commitIndex            int          = 0
-	lastAppliedIndex       int          = 0 // Similar to commitIndex in this assignment
-	voteReceived           int          = 1 // Count number of votes received for this term
-	hearbeatInterval       int          = 5
-	heartbeatTimerIsActive bool         = false
-	listener               *net.UDPConn // define a global listener object for the UDP communication
+	timerIsActive bool = false;
+	serverHostPort string = ""
+	serverAddr *net.UDPAddr
+	timeOut int
+	minTimeOut int = 10;
+	maxTimeOut int = 20;
+	state ServerState = Follower // Start as a follower
+	suspended bool = false // To state if a state has been suspended
+	serversFile string // Path to the persistent storage of the list of servers
+	term int = 0
+	nextIndex map[string]int = make(map[string]int)// List of servers and their index of the next log entry to be sent to that server
+	matchIndex map[string]int = make(map[string]int) // List of servers and their index of highest log entry known to be replicated (commitIndex)
+	timeOutCounter *time.Timer; 
+	servers []string // string of all ip:port of servers present in network
+	leader string = "" // IP:Port address of the leader
+	leaderVotedFor string = ""
+	logs []miniraft.LogEntry
+	commitIndex int = 0
+	lastAppliedIndex int = 0 // Similar to commitIndex in this assignment
+	voteReceived int = 1// Count number of votes received for this term
+	hearbeatInterval int = 5;
+	heartbeatTimerIsActive bool = false;
+	listener *net.UDPConn
 )
 
 //=========================================
@@ -67,13 +65,13 @@ var (
 //=========================================
 
 // Getter and Setter for server HostPort Address
-func setServerHostPort(hostPort string) {
+func setServerHostPort(hostPort string){
 	mutex.Lock()
 	defer mutex.Unlock()
-	serverHostPort = hostPort
+	serverHostPort = hostPort 
 }
 
-func getServerHostPort() string {
+func getServerHostPort() string{
 	mutex.Lock()
 	defer mutex.Unlock()
 	return serverHostPort
@@ -86,73 +84,63 @@ func getServerHostPort() string {
 //=========================================
 
 // Function to start server on the defined address
-func startServer(serverHostPort string) {
+func startServer(serverHostPort string){
 	addr, err := net.ResolveUDPAddr("udp", serverHostPort)
-	if err != nil {
+	if err != nil { 
 		log.Fatal(err)
 	}
-	// serverAddr = addr
+	serverAddr = addr
 
 	// Generate random timeout
-	timeOut = rand.Intn(maxTimeOut-minTimeOut+1) + minTimeOut
-
-	// Initialize listener at the global scope
-    listener, err = net.ListenUDP("udp", addr)
-    if err != nil {
-        log.Fatal("Error starting UDP listener:", err)
-    }
-
-    log.Println("Starting UDP listener on:", addr.String())
+	timeOut = rand.Intn(maxTimeOut - minTimeOut + 1) + minTimeOut
 
 	// Start communication (looped to keep listening until exit)
-	handleCommunication()
+	handleCommunication()	
 }
 
 /* Checks if server is in the list of servers, else append it */
 func updateServerList(serverHostPort string, new_serversFile string) {
 	// Open the file in read-write mode, create it if not exists
-	file, err := os.OpenFile(new_serversFile, os.O_RDWR|os.O_CREATE, 0666)
-	panicCheck(err)
-	defer file.Close()
+    file, err := os.OpenFile(new_serversFile, os.O_RDWR|os.O_CREATE, 0666)
+    panicCheck(err)
+    defer file.Close()
 
 	// Update the current server's knowledge of the persistent storage location
 	serversFile = new_serversFile
 
-	// Check if the current address is already in the file
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		if scanner.Text() == serverHostPort {
+    // Check if the current address is already in the file
+    scanner := bufio.NewScanner(file)
+    for scanner.Scan() {
+        if scanner.Text() == serverHostPort {
 			// defined serverHostPort already exist in the list
 			// Throw error and leave the program
 			log.Printf("Server address %s defined already exist in %s", serverHostPort, serversFile)
 			os.Exit(1)
-		}
-	}
+        }
+    }
 
-	err = scanner.Err()
+    err = scanner.Err()
 	panicCheck(err)
 
-	// Append the current address if it doesn't exist in the file
+    // Append the current address if it doesn't exist in the file
 	_, err = file.WriteString(serverHostPort + "\n")
 	panicCheck(err)
-
+	
 	// Debug: Status announce that address has been added to the file containing list of servers
 	fmt.Printf("%s added into %s\n", serverHostPort, serversFile)
 }
 
 // Checks if there is error, if so, then panic
 func panicCheck(e error) {
-	if e != nil {
-		panic(e)
-	}
+    if e != nil {
+        panic(e)
+    }
 }
 
-/*
-startCommandInterface runs the interactive
-command interface for the Server Process
-*/
+/* startCommandInterface runs the interactive 
+ command interface for the Server Process */
 func startCommandInterface() {
-	reader := bufio.NewReader(os.Stdin) // Create a reader for stdin
+	reader := bufio.NewReader(os.Stdin)                                      // Create a reader for stdin
 	fmt.Println("Server Process command interface started. Enter commands:")
 
 	for {
@@ -166,51 +154,51 @@ func startCommandInterface() {
 
 		// Switch between different command keywords
 		switch cmd {
-		case "exit":
-			// Handle the 'exit' command.
-			fmt.Println("Exiting Server Process.")
-			log.Printf("[startCommandInterface] Exit command received. serverHostPort: %s", serverHostPort)
-			os.Exit(0)
-		case "log":
-			fmt.Printf("Log Entries for %s:\n", serverHostPort)
-			fmt.Printf("| %10s | %10s | %s\n", "Index", "Term", "CommandName")
-			fmt.Printf("|%s|\n", strings.Repeat("-", 40))
-			for _, log := range logs {
-				fmt.Printf("| %10d | %10d | %s\n", log.Index, log.Term, log.CommandName)
-			}
-		case "print":
-			fmt.Printf("Summary of %s\n", serverHostPort)
-			fmt.Printf("Current Term: %d\n", term)
-			fmt.Printf("Leader voted for: %s\n", string(leaderVotedFor))
-			fmt.Printf("State: %d\n", state)
-			fmt.Printf("Commit Index: %d\n", commitIndex)
-			fmt.Printf("Last Applied Index: %d\n", lastAppliedIndex)
-			fmt.Printf("Next Index:\n")
-			for key, value := range nextIndex {
-				fmt.Printf("%s : %d\n", key, value)
-			}
-			fmt.Printf("Match Index:\n")
-			for key, value := range matchIndex {
-				fmt.Printf("%s : %d\n", key, value)
-			}
-			fmt.Printf("Timeout: %d\n", timeOut)
-			fmt.Printf("Current Leader: %s\n", leader)
-		case "resume":
-			if suspended {
-				fmt.Println("Resuming server")
-				suspended = false
-			} else {
-				fmt.Println("Server was not in suspended state")
-			}
-		case "suspend":
-			if suspended {
-				fmt.Println("Server is already suspended")
-			} else {
-				fmt.Println("Suspending Server")
-				suspended = true
-			}
-		default:
-			fmt.Println("Command is unrecognised")
+			case "exit":
+				// Handle the 'exit' command.
+				fmt.Println("Exiting Server Process.") 
+				log.Printf("[startCommandInterface] Exit command received. serverHostPort: %s", serverHostPort)
+				os.Exit(0)
+			case "log":
+				fmt.Printf("Log Entries for %s:\n", serverHostPort)
+				fmt.Printf("| %10s | %10s | %s\n", "Index", "Term", "CommandName")
+				fmt.Printf("|%s|\n", strings.Repeat("-", 40))
+				for _, log := range logs {
+					fmt.Printf("| %10d | %10d | %s\n", log.Index, log.Term, log.CommandName)
+				}
+			case "print":
+				fmt.Printf("Summary of %s\n", serverHostPort)
+				fmt.Printf("Current Term: %d\n", term)
+				fmt.Printf("Leader voted for: %s\n", string(leaderVotedFor))
+				fmt.Printf("State: %d\n", state)
+				fmt.Printf("Commit Index: %d\n", commitIndex)
+				fmt.Printf("Last Applied Index: %d\n", lastAppliedIndex)
+				fmt.Printf("Next Index:\n")
+				for key, value := range nextIndex {
+					fmt.Printf("%s : %d\n", key, value)
+				} 
+				fmt.Printf("Match Index:\n")
+				for key, value := range matchIndex {
+					fmt.Printf("%s : %d\n", key, value)
+				}
+				fmt.Printf("Timeout: %d\n", timeOut)
+				fmt.Printf("Current Leader: %s\n", leader)
+			case "resume":
+				if suspended {
+					fmt.Println("Resuming server")
+					suspended = false
+				} else {
+					fmt.Println("Server was not in suspended state")
+				}	
+			case "suspend":
+				if suspended {
+					fmt.Println("Server is already suspended")
+				} else {
+					fmt.Println("Suspending Server")
+					suspended = true
+				}
+			default:
+				fmt.Println("Command is unrecognised")
 		}
 	}
 }
@@ -222,19 +210,19 @@ func startCommandInterface() {
 //=========================================
 
 /* Check timeout for client */
-func handleTimeOut() {
+func handleTimeOut(){
 	// Change to candidate state
 	if state == Leader {
 		return
 	}
-	state = Candidate
+	state = Candidate;
 
 	// Send out votes
 	// Create an instance of RequestVoteRequest
 	term++ // Update term for election
 	request := &miniraft.RequestVoteRequest{
 		Term:          uint64(term), // Add one to the term when becoming a candidate
-		LastLogIndex:  GetLastLogIndex(),
+		LastLogIndex:  GetLastLogIndex(), 
 		LastLogTerm:   GetLastLogTerm(),
 		CandidateName: serverHostPort,
 	}
@@ -247,7 +235,7 @@ func handleTimeOut() {
 	}
 
 	// Set new random timeOut for leader
-	timeOut = rand.Intn(maxTimeOut-minTimeOut+1) + minTimeOut
+	timeOut = rand.Intn(maxTimeOut - minTimeOut + 1) + minTimeOut
 
 	// To request for votes
 	broadcastMessage(message)
@@ -259,36 +247,21 @@ func handleTimeOut() {
 //=========================================
 //=========================================
 
-/*
-	This function sets up the listening port for the server to receive
-
-messages from other servers
-*/
-func handleCommunication() {
-	// addr, err := net.ResolveUDPAddr("udp", serverHostPort)
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-
-	// listener, err := net.ListenUDP("udp", addr)
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-
-	// listener, err := net.ListenUDP("udp", addr)
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-	// log.Println("Starting UDP listener on:", addr.String())
+/* This function sets up the listening port for the server to receive
+messages from other servers */
+func handleCommunication(){
+	lstnr, err := net.ListenUDP("udp", serverAddr)
+	listener = lstnr
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Start Communication
-	for {
+	for { 
 		data := make([]byte, 65536)
 		length, addr, err := listener.ReadFromUDP(data)
 		if err != nil {
 			log.Fatal(err)
-			log.Printf("Error reading from UDP: %v\n", err)
-			continue
 		}
 
 		// Stop any timer that was running
@@ -300,15 +273,13 @@ func handleCommunication() {
 		// Debug message to check message received
 		log.Printf("From %s: %v\n", addr.String(), data[:length])
 
-		log.Printf("Received UDP packet from %s, length %d\n", addr.String(), length)
-
 		// Handles the message based on its type
-		handleMessage(data[:length], addr.String())
+		handleMessage(data[:length], addr.String());
 	}
 }
 
 /* Function to handle the message based on its type */
-func handleMessage(data []byte, senderAddress string) {
+func handleMessage(data []byte, senderAddress string){
 	// Unmarshal the message
 	message := &miniraft.Raft{}
 	err := proto.Unmarshal(data, message)
@@ -317,14 +288,14 @@ func handleMessage(data []byte, senderAddress string) {
 	}
 
 	// Debug message to check unmarshalled message
-	log.Printf("Unmarshalled message: %v\n", data)
+	log.Printf("Unmarshalled message: %v\n", data)	
 
 	// Switch between different types of protobuf message
-	mutex.Lock()
+	mutex.Lock() 
 	defer mutex.Unlock() // Release the mutex
 	if suspended {
 		fmt.Println("Received message but suspended.")
-		return
+		return 
 	}
 
 	switch msg := message.Message.(type) {
@@ -335,10 +306,10 @@ func handleMessage(data []byte, senderAddress string) {
 		fmt.Printf("Received AppendEntriesRequest from %s: %s\n", senderAddress, msg.AppendEntriesRequest)
 		handleAppendEntriesRequest(*msg)
 	case *miniraft.Raft_AppendEntriesResponse:
-		fmt.Println("Received AppendEntriesResponse: ", msg.AppendEntriesResponse)
+		fmt.Println("Received AppendEntriesResponse: ", msg.AppendEntriesResponse)	
 		handleAppendEntriesResponse(*msg, senderAddress)
 	case *miniraft.Raft_RequestVoteRequest:
-		fmt.Println("Received RequestVoteRequest: ", msg.RequestVoteRequest)
+		fmt.Println("Received RequestVoteRequest: ", msg.RequestVoteRequest)	
 		handleRequestVoteRequest(*msg)
 	case *miniraft.Raft_RequestVoteResponse:
 		fmt.Println("Received RequestVoteResponse: ", msg.RequestVoteResponse)
@@ -349,7 +320,7 @@ func handleMessage(data []byte, senderAddress string) {
 }
 
 /* Function to broadcast msg to all servers that are in the server list */
-func broadcastMessage(message *miniraft.Raft) {
+func broadcastMessage(message *miniraft.Raft){
 	updateServersKnowledge() // To update list of known servers
 
 	// If server is suspended
@@ -363,7 +334,6 @@ func broadcastMessage(message *miniraft.Raft) {
 		log.Fatal("Error when sending message")
 	}
 
-	log.Println("Broadcasting message to other servers")
 	// Iterate over the server addresses
 	for _, addr := range servers {
 		if addr != serverHostPort {
@@ -371,68 +341,34 @@ func broadcastMessage(message *miniraft.Raft) {
 			if err != nil {
 				log.Fatal(err)
 			}
-
-			if listener == nil {
-				log.Fatal("Listener is nil. Cannot broadcast message.")
-			}
-
-			// Use listener to send the message.
+	
+			// Serialize the message
 			_, err = listener.WriteToUDP(msg, dst)
+			log.Printf("SendMiniRaftMessage(): sending %s, %d to %s\n", message, len(msg), dst.String())
 			if err != nil {
-				log.Printf("Failed to send message to %s: %v", addr, err)
-				continue
+				log.Panicln("Failed to marshal message.", err)	
 			}
+
 			fmt.Printf("Message sent to %s\n", addr)
-			log.Printf("Successfully sent message to %s\n", addr)
-
-			// // Resolve the local address your server is listening on
-			// lAddr, err := net.ResolveUDPAddr("udp", serverHostPort)
-			// if err != nil {
-			// 	log.Fatal(err)
-			// }
-
-			// conn, err := net.DialUDP("udp", lAddr, dst)
-			// if err != nil {
-			// 	log.Printf("Failed to dial UDP server %s: %v", dst, err)
-			// 	continue
-			// }
-
-			// // Send a message to the server
-			// _, err = conn.Write([]byte(msg))
-			// if err != nil {
-			// 	log.Printf("Failed to send message to %s: %v", dst, err)
-			// 	continue
-			// }
-
-			// conn.Close()
-
 		}
 	}
 }
 
 // Function to send the miniraft message
 func SendMiniRaftMessage(ipPortAddr string, message *miniraft.Raft) (err error) {
-	log.Printf("Sending MiniRaft message to %s\n", ipPortAddr)
 	dst, err := net.ResolveUDPAddr("udp", ipPortAddr)
-	if err != nil {
-		log.Println("Error resolving destination address:", err)
-		log.Fatal(err)
-	}
+		if err != nil {
+			log.Fatal(err)
+		}
 
 	// Serialize the message
 	data, err := proto.Marshal(message)
+	_, err = listener.WriteToUDP(data, dst)
 	log.Printf("SendMiniRaftMessage(): sending %s, %d to %s\n", message, len(data), dst.String())
 	if err != nil {
 		log.Panicln("Failed to marshal message.", err)
 	}
 
-	// Send the message over, we dont need to send the size of the message as UDP handles it,
-	// but we need to specify the address of where we are sending it to as UDP is stateless and it doesnt rmb where data should be sent
-	_, err = listener.WriteToUDP(data, dst)
-	if err != nil {
-		log.Panicln("Failed to send message.", err)
-	}
-	log.Printf("Successfully sent MiniRaft message to %s\n", ipPortAddr)
 	return
 }
 
@@ -443,19 +379,18 @@ func SendMiniRaftMessage(ipPortAddr string, message *miniraft.Raft) (err error) 
 //=========================================
 
 func handleCommandName(message miniraft.Raft_CommandName) {
-	log.Printf("Received command name: %s\n", message.CommandName)
 	// Check if current leader is this server
 	if leader == "" {
 		// if leader has not been established
 		// drop the message (Could also buffer it)
-		return
+		return 
 	} else if leader == serverHostPort {
-		// Send out the command name to the others
+		// Send out the command name to the others		
 		// Create a log object
-		// TODO: Create log object
+		// TODO: Create log object	
 		logEntry := miniraft.LogEntry{
-			Index:       uint64(len(logs)) + 1,
-			Term:        uint64(term),
+			Index: uint64(len(logs)) + 1,
+			Term: uint64(term),
 			CommandName: message.CommandName,
 		}
 
@@ -467,10 +402,10 @@ func handleCommandName(message miniraft.Raft_CommandName) {
 
 		// Leader sends AppendEntries to  message to followers
 		request := miniraft.AppendEntriesRequest{
-			Term:         uint64(term),
-			LeaderId:     serverHostPort,
+			Term: uint64(term),
+			LeaderId: serverHostPort,
 			PrevLogIndex: prevLogIndex,
-			PrevLogTerm:  prevLogTerm,
+			PrevLogTerm: prevLogTerm,
 			Entries: []*miniraft.LogEntry{
 				&logEntry,
 			},
@@ -493,7 +428,6 @@ func handleCommandName(message miniraft.Raft_CommandName) {
 		}
 		SendMiniRaftMessage(leader, message)
 	}
-	log.Printf("Broadcasting command name: %s to followers\n", message.CommandName)
 }
 
 func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
@@ -513,17 +447,18 @@ func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
 		if message.AppendEntriesRequest.GetTerm() >= uint64(term) {
 			leader = message.AppendEntriesRequest.GetLeaderId()
 			state = Follower
-			term = int(message.AppendEntriesRequest.GetTerm())
+			term = int(message.AppendEntriesRequest.GetTerm())	
 		}
 	} else {
 		leader = message.AppendEntriesRequest.GetLeaderId()
 	}
+	
 
 	// Checks to get success result for Response message
 	if message.AppendEntriesRequest.GetTerm() < uint64(term) {
 		success = false
-	}
-
+	} 
+	
 	if len(logs) >= int(message.AppendEntriesRequest.GetPrevLogIndex()) {
 		if message.AppendEntriesRequest.GetPrevLogIndex() != 0 {
 			// Check if logs contains an entry at prevLogIndex whose term matches prevLogTerm
@@ -536,22 +471,22 @@ func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
 	// Check if there are conflicts in existing entry with new ones, delete the existing entry and all that follows it
 	for _, newEntry := range message.AppendEntriesRequest.GetEntries() {
 		// Check length of log
-		if len(logs) < int(newEntry.GetIndex()) {
+		if len(logs) < int(newEntry.GetIndex()){
 			continue
 		}
-		if logs[newEntry.GetIndex()-1].GetTerm() != message.AppendEntriesRequest.GetTerm() {
+		if logs[newEntry.GetIndex() - 1].GetTerm() != message.AppendEntriesRequest.GetTerm() {
 			// Delete the existing entries that follow it
-			logs = logs[:newEntry.GetIndex()-1]
+			logs = logs[:newEntry.GetIndex() - 1]
 		}
 	}
 
-	responseMsg := &miniraft.Raft{}
+	responseMsg := &miniraft.Raft{};
 	// Check if previous term, index is the same as the leader, if not then reject
-	if GetLastLogIndex() != message.AppendEntriesRequest.PrevLogIndex ||
-		GetLastLogTerm() != message.AppendEntriesRequest.PrevLogTerm {
+	if GetLastLogIndex() != message.AppendEntriesRequest.PrevLogIndex || 
+	GetLastLogTerm() != message.AppendEntriesRequest.PrevLogTerm {
 		// Reject the appendEntriesRequest
 		response := &miniraft.AppendEntriesResponse{
-			Term:    GetLastLogTerm(),
+			Term: GetLastLogTerm(),
 			Success: false,
 		}
 
@@ -559,7 +494,7 @@ func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
 			Message: &miniraft.Raft_AppendEntriesResponse{
 				AppendEntriesResponse: response,
 			},
-		}
+		}	
 	} else {
 		// Append any new entries not already in the log
 		for _, newEntry := range message.AppendEntriesRequest.GetEntries() {
@@ -581,10 +516,10 @@ func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
 
 		// Server response to appendEntriesRPC
 		response := &miniraft.AppendEntriesResponse{
-			Term:    uint64(term), // Add one to the term when becoming a candidate
-			Success: success,
+			Term:          uint64(term), // Add one to the term when becoming a candidate
+			Success:  success, 
 		}
-
+		
 		responseMsg = &miniraft.Raft{
 			Message: &miniraft.Raft_AppendEntriesResponse{
 				AppendEntriesResponse: response,
@@ -610,11 +545,11 @@ func handleAppendEntriesResponse(message miniraft.Raft_AppendEntriesResponse, se
 	// Check if message has been rejected
 	if !message.AppendEntriesResponse.Success {
 		// Decrement the known nextIndex for the sender that rejected the message
-		nextIndex[senderAddress]--
+		nextIndex[senderAddress]--;
 
 		// Resend the appendEntriesRequest to this server with decremented index
 		var prevLogIndex = nextIndex[senderAddress] - 1
-
+		
 		var indexToSend = 0
 		if prevLogIndex <= 0 {
 			indexToSend = 0
@@ -625,37 +560,37 @@ func handleAppendEntriesResponse(message miniraft.Raft_AppendEntriesResponse, se
 
 		// Prepare entry to resend
 		request := miniraft.AppendEntriesRequest{
-			Term:         uint64(term),
-			LeaderId:     serverHostPort,
+			Term: uint64(term),
+			LeaderId: serverHostPort,
 			PrevLogIndex: uint64(prevLogIndex),
-			PrevLogTerm:  prevLogTerm,
+			PrevLogTerm: prevLogTerm,
 			Entries: []*miniraft.LogEntry{
 				&logs[indexToSend],
 			},
 			LeaderCommit: uint64(commitIndex),
 		}
-
+	
 		// wrap the request in a raft message(AppendEntriesRequest)
 		message := &miniraft.Raft{
 			Message: &miniraft.Raft_AppendEntriesRequest{
 				AppendEntriesRequest: &request,
 			},
-		}
+		}	
 
 		// Send request
 		SendMiniRaftMessage(senderAddress, message)
 	} else {
 		// Update index of highest log entry known to be replicated by the follower
 		matchIndex[senderAddress] = nextIndex[senderAddress]
-
+	
 		// Increment the follower's next index to be sent if it is not already the last entry in the leader
-		if nextIndex[senderAddress] != len(logs)+1 {
-			nextIndex[senderAddress]++
+		if nextIndex[senderAddress] != len(logs) + 1{
+			nextIndex[senderAddress]++;
 		}
-
+		
 		// Update commitIndex of leader
-		for commitIndex <= len(logs) {
-			// Check for a majority value
+		for commitIndex <= len(logs){
+			// Check for a majority value 
 			count := 0
 			for _, value := range matchIndex {
 				if value == commitIndex {
@@ -663,7 +598,7 @@ func handleAppendEntriesResponse(message miniraft.Raft_AppendEntriesResponse, se
 				}
 			}
 
-			if count+1 > len(servers)/2 {
+			if count + 1 > len(servers) / 2 {
 				commitIndex++
 			} else {
 				break
@@ -672,28 +607,28 @@ func handleAppendEntriesResponse(message miniraft.Raft_AppendEntriesResponse, se
 		commitIndex--
 
 		// If nextIndex[senderAddress] is now equal to that of the server's then do not send request again, else send next request
-		if nextIndex[senderAddress] == len(logs)+1 {
+		if nextIndex[senderAddress] == len(logs) + 1 {
 			return
 		}
 		// Else send the next request
 		// Prepare entry to resend
 		request := miniraft.AppendEntriesRequest{
-			Term:         uint64(term),
-			LeaderId:     serverHostPort,
+			Term: uint64(term),
+			LeaderId: serverHostPort,
 			PrevLogIndex: uint64(nextIndex[senderAddress] - 1),
-			PrevLogTerm:  (logs[nextIndex[senderAddress]-1-1]).GetTerm(),
+			PrevLogTerm: (logs[nextIndex[senderAddress] - 1 - 1]).GetTerm(),
 			Entries: []*miniraft.LogEntry{
-				&logs[nextIndex[senderAddress]-1],
+				&logs[nextIndex[senderAddress] - 1],
 			},
 			LeaderCommit: uint64(commitIndex),
 		}
-
+	
 		// wrap the request in a raft message(AppendEntriesRequest)
 		message := &miniraft.Raft{
 			Message: &miniraft.Raft_AppendEntriesRequest{
 				AppendEntriesRequest: &request,
 			},
-		}
+		}	
 
 		// Send message to response server
 		SendMiniRaftMessage(senderAddress, message)
@@ -701,28 +636,28 @@ func handleAppendEntriesResponse(message miniraft.Raft_AppendEntriesResponse, se
 
 }
 
-// If receiving a request vote
-func handleRequestVoteRequest(message miniraft.Raft_RequestVoteRequest) {
+// If receiving a request vote 
+func handleRequestVoteRequest(message miniraft.Raft_RequestVoteRequest){
 	// Check if server has the pre-requisite to be voted
 	// Choose candidate with log most likely to contain all committed entries
 	// This is achieved by comparing logs
-	var vote miniraft.RequestVoteResponse
+	var vote miniraft.RequestVoteResponse;
 
-	if message.RequestVoteRequest.LastLogTerm < GetLastLogTerm() ||
-		(message.RequestVoteRequest.LastLogTerm == GetLastLogTerm() &&
-			message.RequestVoteRequest.LastLogIndex < GetLastLogIndex()) {
+	if (message.RequestVoteRequest.LastLogTerm < GetLastLogTerm() ||
+	(message.RequestVoteRequest.LastLogTerm == GetLastLogTerm() &&
+	message.RequestVoteRequest.LastLogIndex < GetLastLogIndex() )){
 		// Do not give vote to candidate since he is out-dated
 		vote = miniraft.RequestVoteResponse{
-			Term:        uint64(term), // To update candidate
-			VoteGranted: false,
+			Term:          uint64(term), // To update candidate
+			VoteGranted:   false,
 		}
 	} else {
 		// Send a vote to the candidate
 		leaderVotedFor = message.RequestVoteRequest.CandidateName
 
 		vote = miniraft.RequestVoteResponse{
-			Term:        message.RequestVoteRequest.GetTerm(), // Take candidate's term
-			VoteGranted: true,
+			Term:          message.RequestVoteRequest.GetTerm(), // Take candidate's term
+			VoteGranted:   true,
 		}
 
 		// Update own term
@@ -730,49 +665,51 @@ func handleRequestVoteRequest(message miniraft.Raft_RequestVoteRequest) {
 	}
 
 	// Set new random timeout
-	timeOut = rand.Intn(maxTimeOut-minTimeOut+1) + minTimeOut
+	timeOut = rand.Intn(maxTimeOut - minTimeOut + 1) + minTimeOut 
 
 	// Create Message wrapper for raft message
 	voteResponse := &miniraft.Raft{
 		Message: &miniraft.Raft_RequestVoteResponse{
 			RequestVoteResponse: &vote,
 		},
-	}
+	}	
 
 	// Send message to candidate
 	SendMiniRaftMessage(message.RequestVoteRequest.GetCandidateName(), voteResponse)
 }
 
-func handleRequestVoteResponse(message miniraft.Raft_RequestVoteResponse) {
+
+func handleRequestVoteResponse(message miniraft.Raft_RequestVoteResponse){
 	// Check if state is still candidate
 	updateServersKnowledge()
 	if state == Candidate {
 		// Count up if vote received is granted
 		if message.RequestVoteResponse.VoteGranted {
 			voteReceived++
-			if voteReceived > len(servers)/2 {
+			if voteReceived > len(servers) / 2 {
 				// Received majority
 				setupLeader()
-			}
+			}	
 		}
 	}
 }
 
-/* Function to initialise and setup a leader */
-func setupLeader() {
-	// Send heartbeat to tell servers, this is the new leader
-	SendHeartBeat()
-	state = Leader           // Become the new leader
-	go SetHeartBeatRoutine() // Routinely send heartbeat
-	leader = serverHostPort  // Update who the current leader is
-	voteReceived = 1         // Reset counter (1 because leader votes for himself)
 
+/* Function to initialise and setup a leader */
+func setupLeader(){	
+	// Send heartbeat to tell servers, this is the new leader
+	SendHeartBeat();				
+	state = Leader; // Become the new leader
+	go SetHeartBeatRoutine(); // Routinely send heartbeat
+	leader = serverHostPort // Update who the current leader is
+	voteReceived = 1 // Reset counter (1 because leader votes for himself)
+	
 	// Initialise the nextIndex and matchIndex
 	for _, server := range servers {
 		nextIndex[server] = int(GetLastLogIndex()) + 1
 		matchIndex[server] = 0
 	}
-
+	
 	// Stop timer too for timeout
 	timerMutex.Lock()
 	defer timerMutex.Unlock()
@@ -797,47 +734,47 @@ func setupLeader() {
 
 // To set timer for handling timeout of servers
 func resetTimer() {
-	timerMutex.Lock()
-	defer timerMutex.Unlock()
+    timerMutex.Lock()
+    defer timerMutex.Unlock()
 
-	if timerIsActive {
-		// Stop the current timer. If Stop returns false, the timer has already fired.
-		if !timeOutCounter.Stop() {
-			// If the timer already expired and the handleTimeOut function might be in queue,
-			// try to drain the channel to prevent handleTimeOut from executing if it hasn't yet.
-			select {
-			case <-timeOutCounter.C:
-			default:
-			}
-		}
-	}
+    if timerIsActive {
+        // Stop the current timer. If Stop returns false, the timer has already fired.
+        if !timeOutCounter.Stop() {
+            // If the timer already expired and the handleTimeOut function might be in queue,
+            // try to drain the channel to prevent handleTimeOut from executing if it hasn't yet.
+            select {
+            case <-timeOutCounter.C:
+            default:
+            }
+        }
+    }
 
-	// Regardless of the previous timer's state, start a new timer.
-	timerIsActive = true
-	timeOutCounter = time.AfterFunc(time.Second*time.Duration(timeOut), func() {
-		handleTimeOut()
-		// After the timer executes, reset timerIsActive to false.
-		timerMutex.Lock()
-		timerIsActive = false
-		timerMutex.Unlock()
-	})
+    // Regardless of the previous timer's state, start a new timer.
+    timerIsActive = true
+    timeOutCounter = time.AfterFunc(time.Second*time.Duration(timeOut), func() {
+        handleTimeOut()
+        // After the timer executes, reset timerIsActive to false.
+        timerMutex.Lock()
+        timerIsActive = false
+        timerMutex.Unlock()
+    })
 }
 
 func GetLastLogIndex() uint64 {
-	if len(logs) < 1 {
+	if (len(logs) < 1) {
 		return 0
 	}
-	return logs[len(logs)-1].Index
+	return logs[len(logs) - 1].Index
 }
 
 func GetLastLogTerm() uint64 {
 	if len(logs) < 1 {
 		return 0
 	}
-	return logs[len(logs)-1].Term
+	return logs[len(logs) - 1].Term
 }
 
-func updateServersKnowledge() {
+func updateServersKnowledge(){
 	// Open the file in read-only mode
 	file, err := os.Open(serversFile)
 	if err != nil {
@@ -860,30 +797,27 @@ func updateServersKnowledge() {
 	}
 }
 
-/*
-	This function sets the heartbeat routine for
-
-leader to send heartbeat in a fixed interval
-*/
-func SetHeartBeatRoutine() {
+/* This function sets the heartbeat routine for 
+leader to send heartbeat in a fixed interval */
+func SetHeartBeatRoutine(){
 	for state == Leader {
 		heartbeatTimerMutex.Lock()
 		if !heartbeatTimerIsActive {
 			heartbeatTimerIsActive = true
-			timeOutCounter = time.AfterFunc(time.Second*time.Duration(hearbeatInterval), SendHeartBeat)
+			timeOutCounter = time.AfterFunc(time.Second*time.Duration(hearbeatInterval), SendHeartBeat);
 		}
 		heartbeatTimerMutex.Unlock()
 	}
 }
 
 /* This function is used for the leader to send heartbeats */
-func SendHeartBeat() {
+func SendHeartBeat(){
 	request := miniraft.AppendEntriesRequest{
-		Term:         uint64(term),
-		LeaderId:     serverHostPort,
+		Term: uint64(term),
+		LeaderId: serverHostPort,
 		PrevLogIndex: GetLastLogIndex(),
-		PrevLogTerm:  GetLastLogTerm(),
-		Entries:      nil,
+		PrevLogTerm: GetLastLogTerm(),
+		Entries: nil,
 		LeaderCommit: uint64(commitIndex),
 	}
 
@@ -899,7 +833,6 @@ func SendHeartBeat() {
 	heartbeatTimerIsActive = false // Set timer off
 	heartbeatTimerMutex.Unlock()
 }
-
 //=========================================
 //=========================================
 // Server Main
@@ -914,7 +847,7 @@ func main() {
 	}
 
 	serverHostPort := os.Args[1] // Get the server address from command-line arguments
-	serversFile := os.Args[2]    // Get the filename of the file containing all the servers
+	serversFile := os.Args[2] // Get the filename of the file containing all the servers
 	if !strings.Contains(serverHostPort, ":") {
 		fmt.Println("Invalid server address. Must be in the format host:port.") // Validate the registry address format
 		return
@@ -929,10 +862,10 @@ func main() {
 	// Check if server exist in the server list and if not append it to the list
 	// If server exist then throw an error and do not start new server with defined address
 	updateServerList(serverHostPort, serversFile)
-
+	
 	// Starts the server on the defined address
 	go startServer(getServerHostPort())
 
 	// Start the interactive command interface
-	startCommandInterface()
+	startCommandInterface() 
 }

@@ -56,13 +56,21 @@ func startClient(serverHostPort string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	connection = conn
+
+	connection = conn;
 
 	dst, err := net.ResolveUDPAddr("udp", serverHostPort)
 	if err != nil {
 		log.Fatal(err)
 	}
 	destinationAddr = dst
+
+
+	// conn, err :=  ("udp", nil, dst)
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+	// connection = conn
 }
 
 // Disconnects the client from the UDP connection when client exits
@@ -72,7 +80,9 @@ func exitClient() {
 	defer mutex.Unlock()
 
 	// Close UDP connection
-	connection.Close()
+	if connection != nil {
+		connection.Close()
+	}
 
 	// Exit the process from OS
 	os.Exit(0)
@@ -165,15 +175,19 @@ func sendCommand(command []byte) {
 	// Lock to prevent any other server action while sending command
 	mutex.Lock()
 	defer mutex.Unlock()
-	log.Printf("Sending command to server at %s\n", destinationAddr.String()) 
+
+	if connection == nil {
+		log.Println("Connection not initialized")
+		return
+	}
 
 	// Sends command through UDP connection
 	_, err := connection.WriteTo(command, destinationAddr)
 	if err != nil {
-		log.Fatal(err)
-	} else { 
-		log.Printf("Command sent to server at %s\n", destinationAddr.String())
-	}
+		log.Fatalf("Failed to send message: %v\n", err)
+	}	
+
+	log.Printf("Message sent: %s", string(command))
 } 
 
 //=========================================
