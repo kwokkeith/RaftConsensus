@@ -216,6 +216,10 @@ func handleTimeOut(){
 		return
 	}
 	state = Candidate;
+
+	// Set new random timeOut for candidate
+	timeOut = rand.Intn(maxTimeOut - minTimeOut + 1) + minTimeOut
+
 	resetTimer() // Restart timer to get election timeout
 
 	// Send out votes
@@ -235,8 +239,8 @@ func handleTimeOut(){
 		},
 	}
 
-	// Set new random timeOut for leader
-	timeOut = rand.Intn(maxTimeOut - minTimeOut + 1) + minTimeOut
+	// Restart voteReceived to be 1 before starting new election
+	voteReceived = 1
 
 	// To request for votes
 	broadcastMessage(message)
