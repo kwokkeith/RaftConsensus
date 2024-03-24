@@ -53,7 +53,7 @@ var (
 	commitIndex int = 0
 	lastAppliedIndex int = 0 // Similar to commitIndex in this assignment
 	voteReceived int = 1// Count number of votes received for this term
-	hearbeatInterval int = 5;
+	heartbeatInterval int = 5;
 	heartbeatTimerIsActive bool = false;
 	listener *net.UDPConn
 )
@@ -239,7 +239,7 @@ func handleTimeOut(){
 		},
 	}
 
-	// Restart voteReceived to be 1 before starting new election
+	// Restart voteReceived to be 1 before starting new
 	voteReceived = 1
 
 	// To request for votes
@@ -840,7 +840,7 @@ func SetHeartBeatRoutine(){
 		heartbeatTimerMutex.Lock()
 		if !heartbeatTimerIsActive {
 			heartbeatTimerIsActive = true
-			timeOutCounter = time.AfterFunc(time.Second*time.Duration(hearbeatInterval), SendHeartBeat);
+			timeOutCounter = time.AfterFunc(time.Second*time.Duration(heartbeatInterval), SendHeartBeat);
 		}
 		heartbeatTimerMutex.Unlock()
 	}
