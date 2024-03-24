@@ -33,6 +33,7 @@ var (
 	mutex sync.Mutex
 	timerMutex sync.Mutex
 	heartbeatTimerMutex sync.Mutex
+	updateLogMutex sync.Mutex // Mutex for updating log file
 	timerIsActive bool = false;
 	serverHostPort string = ""
 	serverAddr *net.UDPAddr
@@ -301,6 +302,7 @@ func handleMessage(data []byte, senderAddress string){
 	defer mutex.Unlock() // Release the mutex
 	if suspended {
 		fmt.Println("Received message but suspended.")
+		
 		return 
 	}
 
@@ -521,6 +523,8 @@ func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
 			logs = append(logs, *newEntry)
 		}
 
+		// Store old commit index to know which index interval to append to log file
+		var oldCommitIndex = commitIndex
 		// Update commitIndex
 		if message.AppendEntriesRequest.GetLeaderCommit() > uint64(commitIndex) {
 			var lastNewEntryIndex uint64 = GetLastLogIndex() 
@@ -530,6 +534,18 @@ func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
 			} else {
 				commitIndex = int(lastNewEntryIndex)
 			}
+		}
+
+		// Write to log file to update server's commited commands.
+		if oldCommitIndex > 0 {
+			oldCommitIndex -= 1
+		}
+		if commitIndex > 0 {
+			commitIndex -= 1
+		}
+		// Update logFile only if commitIndex have changed
+		if (oldCommitIndex != commitIndex){
+			go UpdateLogFile()
 		}
 
 		// Update term
@@ -630,6 +646,7 @@ func handleAppendEntriesResponse(message miniraft.Raft_AppendEntriesResponse, se
 
 			if count + 1 > len(servers) / 2 {
 				commitIndex++
+				go UpdateLogFile()
 			} else {
 				break
 			}
@@ -875,6 +892,36 @@ func SendHeartBeat(){
 	heartbeatTimerIsActive = false // Set timer off
 	heartbeatTimerMutex.Unlock()
 }
+
+/* This function updates the server's log (this should be ran concurrently) */
+func UpdateLogFile(){
+	updateLogMutex.Lock()
+	defer updateLogMutex.Unlock()
+
+	serverHostPortSafe := strings.Replace(serverHostPort, ":", "-", -1)
+
+	// Construct the file name based on the server's host and port.
+	fileName := fmt.Sprintf("../logs/%s.log", serverHostPortSafe)
+
+	// Open the file in write mode. Create it if it does not exist.
+	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		log.Fatalf("Failed to open log file: %v", err)
+	}
+	defer file.Close()
+
+
+	// Construct the log entry.
+	for _, logEntry := range logs {
+		logEntryStr := fmt.Sprintf("%d,%d,%s\n", logEntry.GetTerm(), logEntry.GetIndex(), logEntry.GetCommandName())
+
+		// Write the log entry to the file.
+		if _, err := file.WriteString(logEntryStr); err != nil {
+			log.Fatalf("Failed to write to log file: %v", err)
+		}
+	}
+}
+
 //=========================================
 //=========================================
 // Server Main
