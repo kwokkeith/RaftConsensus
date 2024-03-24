@@ -461,7 +461,11 @@ func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
 			leader = message.AppendEntriesRequest.GetLeaderId()
 			state = Follower
 			term = int(message.AppendEntriesRequest.GetTerm())	
+		} else {
+			// Reject the RPC and continue in the candidate state
+			success = false
 		}
+		
 	} else {
 		leader = message.AppendEntriesRequest.GetLeaderId()
 	}
