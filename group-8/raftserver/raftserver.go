@@ -209,13 +209,14 @@ func startCommandInterface() {
 //=========================================
 //=========================================
 
-/* Check timeout for client */
+/* Check timeout for client, if timeout then turn into a candidate. */
 func handleTimeOut(){
 	// Change to candidate state
 	if state == Leader {
 		return
 	}
 	state = Candidate;
+	resetTimer() // Restart timer to get election timeout
 
 	// Send out votes
 	// Create an instance of RequestVoteRequest
@@ -514,13 +515,7 @@ func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
 
 		// Update commitIndex
 		if message.AppendEntriesRequest.GetLeaderCommit() > uint64(commitIndex) {
-			var lastNewEntryIndex uint64;
-
-			// if len(message.AppendEntriesRequest.GetEntries()) != 0 {
-			// 	lastNewEntryIndex = message.AppendEntriesRequest.GetEntries()[len(message.AppendEntriesRequest.GetEntries())-1].GetIndex()
-			// } else {
-				lastNewEntryIndex = GetLastLogIndex() 
-			// }
+			var lastNewEntryIndex uint64 = GetLastLogIndex() 
 
 			if message.AppendEntriesRequest.GetLeaderCommit() < lastNewEntryIndex {
 				commitIndex = int(message.AppendEntriesRequest.GetLeaderCommit())
