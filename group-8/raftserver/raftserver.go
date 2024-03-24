@@ -38,7 +38,7 @@ var (
 	serverAddr *net.UDPAddr
 	timeOut int
 	minTimeOut int = 10;
-	maxTimeOut int = 20;
+	maxTimeOut int = 100;
 	state ServerState = Follower // Start as a follower
 	suspended bool = false // To state if a state has been suspended
 	serversFile string // Path to the persistent storage of the list of servers
@@ -272,7 +272,7 @@ func handleCommunication(){
 		}
 
 		// Debug message to check message received
-		log.Printf("From %s: %v\n", addr.String(), data[:length])
+		// log.Printf("From %s: %v\n", addr.String(), data[:length])
 
 		// Handles the message based on its type
 		handleMessage(data[:length], addr.String());
@@ -289,7 +289,7 @@ func handleMessage(data []byte, senderAddress string){
 	}
 
 	// Debug message to check unmarshalled message
-	log.Printf("Unmarshalled message: %v\n", data)	
+	// log.Printf("Unmarshalled message: %v\n", data)	
 
 	// Switch between different types of protobuf message
 	mutex.Lock() 
@@ -307,7 +307,7 @@ func handleMessage(data []byte, senderAddress string){
 		fmt.Printf("Received AppendEntriesRequest from %s: %s\n", senderAddress, msg.AppendEntriesRequest)
 		handleAppendEntriesRequest(*msg)
 	case *miniraft.Raft_AppendEntriesResponse:
-		fmt.Println("Received AppendEntriesResponse: ", msg.AppendEntriesResponse)	
+		fmt.Printf("Received AppendEntriesResponse from %s: %s\n", senderAddress, msg.AppendEntriesResponse, )	
 		handleAppendEntriesResponse(*msg, senderAddress)
 	case *miniraft.Raft_RequestVoteRequest:
 		fmt.Println("Received RequestVoteRequest: ", msg.RequestVoteRequest)	
@@ -364,6 +364,10 @@ func SendMiniRaftMessage(ipPortAddr string, message *miniraft.Raft) (err error) 
 
 	// Serialize the message
 	data, err := proto.Marshal(message)
+	if err != nil {
+		log.Panicln("Failed to Marshall message.", err)
+	}
+
 	_, err = listener.WriteToUDP(data, dst)
 	log.Printf("SendMiniRaftMessage(): sending %s, %d to %s\n", message, len(data), dst.String())
 	if err != nil {
@@ -432,7 +436,7 @@ func handleCommandName(message miniraft.Raft_CommandName) {
 }
 
 func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
-	var success = true
+	var success bool = true
 
 	// Set leader (Neutralise old leader too)
 	// if this server thinks it is the leader
@@ -442,6 +446,9 @@ func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
 			leader = message.AppendEntriesRequest.GetLeaderId()
 			state = Follower
 			term = int(message.AppendEntriesRequest.GetTerm())
+		} else {
+			// Ignore the request since this is the current leader
+			return
 		}
 	} else if state == Candidate {
 		// If this server is a candidate then it yields to another candidate that has became a leader
@@ -467,6 +474,9 @@ func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
 				success = false
 			}
 		}
+	} else {
+		// Does not even contain the previous log index as current log is too small
+		success = false
 	}
 
 	// Check if there are conflicts in existing entry with new ones, delete the existing entry and all that follows it
@@ -487,7 +497,7 @@ func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
 	GetLastLogTerm() != message.AppendEntriesRequest.PrevLogTerm {
 		// Reject the appendEntriesRequest
 		response := &miniraft.AppendEntriesResponse{
-			Term: GetLastLogTerm(),
+			Term: uint64(term),
 			Success: false,
 		}
 
@@ -506,11 +516,11 @@ func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
 		if message.AppendEntriesRequest.GetLeaderCommit() > uint64(commitIndex) {
 			var lastNewEntryIndex uint64;
 
-			if len(message.AppendEntriesRequest.GetEntries()) != 0 {
-				lastNewEntryIndex = message.AppendEntriesRequest.GetEntries()[len(message.AppendEntriesRequest.GetEntries())-1].GetIndex()
-			} else {
+			// if len(message.AppendEntriesRequest.GetEntries()) != 0 {
+			// 	lastNewEntryIndex = message.AppendEntriesRequest.GetEntries()[len(message.AppendEntriesRequest.GetEntries())-1].GetIndex()
+			// } else {
 				lastNewEntryIndex = GetLastLogIndex() 
-			}
+			// }
 
 			if message.AppendEntriesRequest.GetLeaderCommit() < lastNewEntryIndex {
 				commitIndex = int(message.AppendEntriesRequest.GetLeaderCommit())
@@ -553,21 +563,26 @@ func handleAppendEntriesResponse(message miniraft.Raft_AppendEntriesResponse, se
 	// Check if message has been rejected
 	if !message.AppendEntriesResponse.Success {
 		// Decrement the known nextIndex for the sender that rejected the message
-		nextIndex[senderAddress]--;
+		if nextIndex[senderAddress] > 1 {
+			nextIndex[senderAddress]--;
+		}
 
 		// Resend the appendEntriesRequest to this server with decremented index
 		var prevLogIndex = nextIndex[senderAddress] - 1
 		
-		var indexToSend = 0
-		if prevLogIndex <= 0 {
-			indexToSend = 0
-		} else {
-			indexToSend = prevLogIndex - 1
-		}
+		var indexToSend = prevLogIndex + 1
 
+		// Check if index to send is larger than the size of current log,
+		// if larger then we are unable to send a mesasge at index and hence ignore.
+		if indexToSend > len(logs){
+			return
+		} 
+
+		// get the previous log, but need to check if there is only 1 message in the log.
+		// We need to handle this edge case by setting the previous log term to be 0 if there is only 1 message.
 		var prevLogTerm uint64 = 0;
-		if len(logs) != 0{
-			prevLogTerm = logs[indexToSend].GetTerm()
+		if indexToSend > 1 {
+			prevLogTerm = logs[indexToSend-1-1].GetTerm()
 		}
 
 		// Prepare entry to resend
@@ -577,7 +592,7 @@ func handleAppendEntriesResponse(message miniraft.Raft_AppendEntriesResponse, se
 			PrevLogIndex: uint64(prevLogIndex),
 			PrevLogTerm: prevLogTerm,
 			Entries: []*miniraft.LogEntry{
-				&logs[indexToSend],
+				&logs[indexToSend-1],
 			},
 			LeaderCommit: uint64(commitIndex),
 		}
@@ -625,12 +640,19 @@ func handleAppendEntriesResponse(message miniraft.Raft_AppendEntriesResponse, se
 		if nextIndex[senderAddress] == len(logs) + 1 {
 			return
 		}
+
+		// In case we are at the beginning
+		var newPrevLogIndex = 0;
+		if nextIndex[senderAddress] > 0 {
+			newPrevLogIndex = nextIndex[senderAddress] - 1 
+		}
+
 		// Else send the next request
 		// Prepare entry to resend
 		request := miniraft.AppendEntriesRequest{
 			Term: uint64(term),
 			LeaderId: serverHostPort,
-			PrevLogIndex: uint64(nextIndex[senderAddress] - 1),
+			PrevLogIndex: uint64(newPrevLogIndex),
 			PrevLogTerm: (logs[nextIndex[senderAddress] - 1 - 1]).GetTerm(),
 			Entries: []*miniraft.LogEntry{
 				&logs[nextIndex[senderAddress] - 1],
@@ -823,6 +845,8 @@ func SetHeartBeatRoutine(){
 		}
 		heartbeatTimerMutex.Unlock()
 	}
+
+	timeOutCounter.Stop()	
 }
 
 /* This function is used for the leader to send heartbeats */
