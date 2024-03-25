@@ -473,19 +473,6 @@ func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
 	if message.AppendEntriesRequest.GetTerm() < uint64(term) {
 		success = false
 	} 
-	
-	// if len(logs) >= int(message.AppendEntriesRequest.GetPrevLogIndex()) {
-	// 	if message.AppendEntriesRequest.GetPrevLogIndex() != 0 {
-	// 		// Check if logs contains an entry at prevLogIndex whose term matches prevLogTerm
-	// 		if logs[message.AppendEntriesRequest.GetPrevLogIndex()-1].GetTerm() !=
-	// 		message.AppendEntriesRequest.GetPrevLogTerm() {
-	// 			success = false
-	// 		}
-	// 	}
-	// } else {
-	// 	// Does not even contain the previous log index as current log is too small
-	// 	success = false
-	// }
 
 	// Check if there are conflicts in existing entry with new ones, delete 
 	// the existing entry and all that follows it
@@ -519,7 +506,9 @@ func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
 	} else {
 		// Append any new entries not already in the log
 		for _, newEntry := range message.AppendEntriesRequest.GetEntries() {
-			logs = append(logs, *newEntry)
+			if len(logs) < int(newEntry.GetIndex()){
+				logs = append(logs, *newEntry)
+			}	
 		}
 
 		// Store old commit index to know which index interval to append to log file
