@@ -294,9 +294,6 @@ func handleMessage(data []byte, senderAddress string){
 		log.Printf("Failed to unmarshal message: %v\n", err)
 	}
 
-	// Debug message to check unmarshalled message
-	// log.Printf("Unmarshalled message: %v\n", data)	
-
 	// Switch between different types of protobuf message
 	mutex.Lock() 
 	defer mutex.Unlock() // Release the mutex
@@ -393,8 +390,7 @@ func SendMiniRaftMessage(ipPortAddr string, message *miniraft.Raft) (err error) 
 func handleCommandName(message miniraft.Raft_CommandName) {
 	// Check if current leader is this server
 	if leader == "" {
-		// if leader has not been established
-		// drop the message (Could also buffer it)
+		// if leader has not been established drop the message (Could also buffer it)
 		return 
 	} else if leader == serverHostPort {
 		// Send out the command name to the others		
@@ -478,19 +474,21 @@ func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
 		success = false
 	} 
 	
-	if len(logs) >= int(message.AppendEntriesRequest.GetPrevLogIndex()) {
-		if message.AppendEntriesRequest.GetPrevLogIndex() != 0 {
-			// Check if logs contains an entry at prevLogIndex whose term matches prevLogTerm
-			if logs[message.AppendEntriesRequest.GetPrevLogIndex()-1].GetTerm() != message.AppendEntriesRequest.GetPrevLogTerm() {
-				success = false
-			}
-		}
-	} else {
-		// Does not even contain the previous log index as current log is too small
-		success = false
-	}
+	// if len(logs) >= int(message.AppendEntriesRequest.GetPrevLogIndex()) {
+	// 	if message.AppendEntriesRequest.GetPrevLogIndex() != 0 {
+	// 		// Check if logs contains an entry at prevLogIndex whose term matches prevLogTerm
+	// 		if logs[message.AppendEntriesRequest.GetPrevLogIndex()-1].GetTerm() !=
+	// 		message.AppendEntriesRequest.GetPrevLogTerm() {
+	// 			success = false
+	// 		}
+	// 	}
+	// } else {
+	// 	// Does not even contain the previous log index as current log is too small
+	// 	success = false
+	// }
 
-	// Check if there are conflicts in existing entry with new ones, delete the existing entry and all that follows it
+	// Check if there are conflicts in existing entry with new ones, delete 
+	// the existing entry and all that follows it
 	for _, newEntry := range message.AppendEntriesRequest.GetEntries() {
 		// Check length of log
 		if len(logs) < int(newEntry.GetIndex()){
@@ -505,7 +503,8 @@ func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
 	responseMsg := &miniraft.Raft{};
 	// Check if previous term, index is the same as the leader, if not then reject
 	if GetLastLogIndex() != message.AppendEntriesRequest.PrevLogIndex || 
-	GetLastLogTerm() != message.AppendEntriesRequest.PrevLogTerm {
+	GetLastLogTerm() != message.AppendEntriesRequest.PrevLogTerm ||
+	len(logs) < int(message.AppendEntriesRequest.GetPrevLogIndex()) {
 		// Reject the appendEntriesRequest
 		response := &miniraft.AppendEntriesResponse{
 			Term: uint64(term),
