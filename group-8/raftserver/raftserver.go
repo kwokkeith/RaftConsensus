@@ -897,7 +897,8 @@ func UpdateLogFile(){
 			break
 		}
 		var logEntry = logs[i];
-		logEntryStr := fmt.Sprintf("%d,%d,%s\n", logEntry.GetTerm(), logEntry.GetIndex(), logEntry.GetCommandName())
+		logEntryStr := fmt.Sprintf("%d,%d,%s\n", logEntry.GetTerm(), 
+		logEntry.GetIndex(), logEntry.GetCommandName())
 
 		// Write the log entry to the file.
 		if _, err := file.WriteString(logEntryStr); err != nil {
