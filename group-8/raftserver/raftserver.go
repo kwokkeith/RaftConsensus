@@ -311,7 +311,7 @@ func handleMessage(data []byte, senderAddress string){
 		fmt.Printf("Received AppendEntriesRequest from %s: %s\n", senderAddress, msg.AppendEntriesRequest)
 		handleAppendEntriesRequest(*msg)
 	case *miniraft.Raft_AppendEntriesResponse:
-		fmt.Printf("Received AppendEntriesResponse from %s: %s\n", senderAddress, msg.AppendEntriesResponse, )	
+		fmt.Printf("Received AppendEntriesResponse from %s: %s\n", senderAddress, msg.AppendEntriesResponse)	
 		handleAppendEntriesResponse(*msg, senderAddress)
 	case *miniraft.Raft_RequestVoteRequest:
 		fmt.Println("Received RequestVoteRequest: ", msg.RequestVoteRequest)	

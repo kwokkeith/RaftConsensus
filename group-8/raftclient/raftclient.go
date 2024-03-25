@@ -64,13 +64,6 @@ func startClient(serverHostPort string) {
 		log.Fatal(err)
 	}
 	destinationAddr = dst
-
-
-	// conn, err :=  ("udp", nil, dst)
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-	// connection = conn
 }
 
 // Disconnects the client from the UDP connection when client exits
