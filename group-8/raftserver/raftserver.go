@@ -511,8 +511,6 @@ func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
 			}	
 		}
 
-		// Store old commit index to know which index interval to append to log file
-		var oldCommitIndex = commitIndex
 		// Update commitIndex
 		if message.AppendEntriesRequest.GetLeaderCommit() > uint64(commitIndex) {
 			var lastNewEntryIndex uint64 = GetLastLogIndex() 
@@ -525,16 +523,8 @@ func handleAppendEntriesRequest(message miniraft.Raft_AppendEntriesRequest) {
 		}
 
 		// Write to log file to update server's commited commands.
-		if oldCommitIndex > 0 {
-			oldCommitIndex -= 1
-		}
-		if commitIndex > 0 {
-			commitIndex -= 1
-		}
 		// Update logFile only if commitIndex have changed
-		if (oldCommitIndex != commitIndex){
-			go UpdateLogFile()
-		}
+		go UpdateLogFile()
 
 		// Update term
 		term = max(term, int(message.AppendEntriesRequest.GetTerm()))
@@ -586,7 +576,8 @@ func handleAppendEntriesResponse(message miniraft.Raft_AppendEntriesResponse, se
 		} 
 
 		// get the previous log, but need to check if there is only 1 message in the log.
-		// We need to handle this edge case by setting the previous log term to be 0 if there is only 1 message.
+		// We need to handle this edge case by setting the previous log term to be 0 
+		// if there is only 1 message.
 		var prevLogTerm uint64 = 0;
 		if indexToSend > 1 {
 			prevLogTerm = logs[indexToSend-1-1].GetTerm()
@@ -644,7 +635,8 @@ func handleAppendEntriesResponse(message miniraft.Raft_AppendEntriesResponse, se
 			commitIndex--
 		}
 
-		// If nextIndex[senderAddress] is now equal to that of the server's then do not send request again, else send next request
+		// If nextIndex[senderAddress] is now equal to that of the server's then do 
+		// not send request again, else send next request
 		if nextIndex[senderAddress] == len(logs) + 1 {
 			return
 		}
@@ -900,7 +892,11 @@ func UpdateLogFile(){
 
 
 	// Construct the log entry.
-	for _, logEntry := range logs {
+	for i := 0; i < commitIndex; i++ {
+		if i > len(logs) - 1 {
+			break
+		}
+		var logEntry = logs[i];
 		logEntryStr := fmt.Sprintf("%d,%d,%s\n", logEntry.GetTerm(), logEntry.GetIndex(), logEntry.GetCommandName())
 
 		// Write the log entry to the file.
