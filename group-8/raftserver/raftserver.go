@@ -281,7 +281,7 @@ func handleCommunication(){
 		// log.Printf("From %s: %v\n", addr.String(), data[:length])
 
 		// Handles the message based on its type
-		handleMessage(data[:length], addr.String());
+		go handleMessage(data[:length], addr.String());
 	}
 }
 
